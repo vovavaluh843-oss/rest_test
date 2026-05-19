@@ -31,6 +31,10 @@ MAX_BOOKING_HOURS = 3  # Максимальная длительность бр�
 WORK_DAY_START = 9  # 9:00 - начало рабочего дня
 WORK_DAY_END = 18  # 18:00 - окончание рабочего дня
 
+# Пути к файлам (определяем ДО использования в ROOMS)
+BASE_DIR = Path(__file__).parent
+IMAGES_DIR = BASE_DIR / "images"
+
 # Настройки переговорных комнат
 # Пути к картинкам - абсолютные пути от корня проекта
 ROOMS = {
@@ -59,10 +63,6 @@ ROOMS = {
         "features": ["Стеклянные стены", "Длинный стол", "Светлое пространство", "Современный дизайн"]
     }
 }
-
-# Пути к файлам
-BASE_DIR = Path(__file__).parent
-IMAGES_DIR = BASE_DIR / "images"
 
 # Настройки логирования
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
