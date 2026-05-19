@@ -18,7 +18,7 @@ VK_BOT_TOKEN = os.getenv("VK_BOT_TOKEN", "")
 VK_API_VERSION = "5.131"  # Версия VK API
 
 # Настройки Google Sheets
-GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "data/service_account.json")
 GOOGLE_SPREADSHEET_ID = os.getenv("GOOGLE_SPREADSHEET_ID", "")
 GOOGLE_SPREADSHEET_URL = os.getenv("GOOGLE_SPREADSHEET_URL", "")
 
@@ -32,13 +32,14 @@ WORK_DAY_START = 9  # 9:00 - начало рабочего дня
 WORK_DAY_END = 18  # 18:00 - окончание рабочего дня
 
 # Настройки переговорных комнат
+# Пути к картинкам - абсолютные пути от корня проекта
 ROOMS = {
     "loft_living": {
         "id": "loft_living",
         "name": "Лофт-Гостиная",
         "description": "Уютная комната с диванами, креслами и журнальным столиком для неформальных встреч.",
         "capacity": "4-6 человек",
-        "image_path": "images/coworking.jpg",
+        "image_path": str(BASE_DIR / "images" / "coworking.jpg"),
         "features": ["Диваны", "Кресла", "Журнальный столик", "Уютная атмосфера"]
     },
     "premium_boardroom": {
@@ -46,7 +47,7 @@ ROOMS = {
         "name": "Премиум-Бордрум",
         "description": "Массивный деревянный стол, кожаные кресла, панорамные окна. Для важных переговоров.",
         "capacity": "8-12 человек",
-        "image_path": "images/big.jpg",
+        "image_path": str(BASE_DIR / "images" / "big.jpg"),
         "features": ["Массивный стол", "Кожаные кресла", "Панорамные окна", "Премиум интерьер"]
     },
     "glass_openspace": {
@@ -54,7 +55,7 @@ ROOMS = {
         "name": "Стеклянный Опенспейс",
         "description": "Современная светлая переговорная со стеклянными стенами и длинным столом для командных спринтов.",
         "capacity": "6-10 человек",
-        "image_path": "images/small.jpg",
+        "image_path": str(BASE_DIR / "images" / "small.jpg"),
         "features": ["Стеклянные стены", "Длинный стол", "Светлое пространство", "Современный дизайн"]
     }
 }

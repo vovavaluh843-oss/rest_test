@@ -11,7 +11,10 @@ from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
 
 from config import VK_BOT_TOKEN, ROOMS
-from database import db, BookingConflictError, ValidationError
+from data import database
+db = database.db
+
+from data.database import BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
 

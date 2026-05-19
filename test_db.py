@@ -5,7 +5,7 @@
 
 import asyncio
 import sys
-from database import db, BookingConflictError, ValidationError
+from data.database import db, BookingConflictError, ValidationError
 
 async def test_connection():
     """Проверка подключения к Google Sheets."""

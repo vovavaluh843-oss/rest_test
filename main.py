@@ -1,8 +1,8 @@
 import asyncio
 import logging
 import sys
-from tg_bot import dp, bot as tg_bot
-from vk_bot import bot as vk_bot
+from tg.tg_bot import dp, bot as tg_bot
+from vk.vk_bot import bot as vk_bot
 
 # Настройка логирования
 logging.basicConfig(

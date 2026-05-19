@@ -20,7 +20,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import TELEGRAM_BOT_TOKEN, ROOMS
-from database import db, BookingConflictError, ValidationError
+from data import database
+db = database.db
+
+from data.database import BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
 
