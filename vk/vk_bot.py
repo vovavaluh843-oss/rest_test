@@ -27,6 +27,8 @@ class BookingState(BaseStateGroup):
     SELECTING_DURATION = 4
     ENTERING_PURPOSE = 5
     CONFIRMING = 6
+    VIEWING_BOOKINGS = 7  # Новое состояние для просмотра броней
+    VIEWING_DATE_SELECT = 8  # Новое состояние для выбора даты просмотра
 
 
 # === КЛАВИАТУРЫ ===
@@ -35,7 +37,44 @@ def get_main_menu_keyboard():
     keyboard = Keyboard(one_time=False)
     keyboard.add(Text("📅 Забронировать комнату"), color=KeyboardButtonColor.PRIMARY)
     keyboard.row()
+    keyboard.add(Text("📋 Просмотр броней"), color=KeyboardButtonColor.SECONDARY)
+    keyboard.row()
     keyboard.add(Text("📋 Мои бронирования"), color=KeyboardButtonColor.SECONDARY)
+    return keyboard
+
+
+def get_view_bookings_keyboard():
+    """Клавиатура выбора периода просмотра броней."""
+    keyboard = Keyboard(one_time=False)
+    keyboard.add(Text("📅 Брони на сегодня"), color=KeyboardButtonColor.PRIMARY)
+    keyboard.row()
+    keyboard.add(Text("🔍 Выбрать конкретную дату"), color=KeyboardButtonColor.PRIMARY)
+    keyboard.row()
+    keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.NEGATIVE)
+    return keyboard
+
+
+def get_view_date_keyboard():
+    """Клавиатура для выбора даты просмотра броней."""
+    keyboard = Keyboard(one_time=False)
+    today = datetime.now()
+    for i in range(7):
+        date_obj = today + timedelta(days=i)
+        date_str = date_obj.strftime("%d.%m.%Y")
+        day_name = date_obj.strftime("%A")
+        day_ru = {
+            "Monday": "Пн", "Tuesday": "Вт", "Wednesday": "Ср",
+            "Thursday": "Чт", "Friday": "Пт", "Saturday": "Сб", "Sunday": "Вс"
+        }.get(day_name, day_name)
+        if i == 0:
+            label = f"Сегодня ({date_str})"
+        elif i == 1:
+            label = f"Завтра ({date_str})"
+        else:
+            label = f"{day_ru} ({date_str})"
+        keyboard.add(Text(label), color=KeyboardButtonColor.PRIMARY)
+        keyboard.row()
+    keyboard.add(Text("◀️ Назад к просмотру"), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
@@ -126,15 +165,46 @@ def update_user_data(peer_id, **kwargs):
     set_user_data(peer_id, data)
 
 
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+
+async def get_user_name(user_id):
+    """Получает имя пользователя через VK API."""
+    try:
+        user_info = await bot.api.users.get(user_ids=user_id)
+        if user_info:
+            return f"{user_info[0].first_name} {user_info[0].last_name}"
+    except Exception as e:
+        logger.error(f"Ошибка получения имени пользователя: {e}")
+    return f"ID: {user_id}"
+
+
+def format_bookings_list(bookings, date_str):
+    """Формирует красивый список бронирований."""
+    if not bookings:
+        return f"На {date_str} бронирований пока нет."
+
+    text = f"📅 Бронирования на {date_str}:\n\n"
+    for booking in bookings:
+        room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
+        username = booking.get("Имя", "—")
+        text += (
+            f"• {booking['Время Начала']} — {booking['Время Конца']} | "
+            f"{room_name} ({username})\n"
+        )
+    return text
+
+
 # === ОБРАБОТЧИКИ ===
 
 @bot.on.message(text=["/start", "Начать", "Меню", "меню"])
 async def cmd_start(message: Message):
     set_user_data(message.peer_id, {})
+    await bot.state_dispenser.delete(message.peer_id)
     await message.answer(
         "👋 Добро пожаловать в систему бронирования переговорных комнат!\n\n"
         "Здесь вы можете:\n"
         "• 📅 Забронировать комнату для встречи\n"
+        "• 📋 Просмотреть все бронирования\n"
         "• 📋 Управлять своими бронированиями\n\n"
         "Выберите действие:",
         keyboard=get_main_menu_keyboard()
@@ -164,6 +234,63 @@ async def process_book_room(message: Message):
         "🏢 Выберите переговорную комнату:",
         keyboard=get_rooms_keyboard()
     )
+
+
+@bot.on.message(text="📋 Просмотр броней")
+async def process_view_bookings(message: Message):
+    await bot.state_dispenser.set(message.peer_id, BookingState.VIEWING_BOOKINGS)
+    await message.answer(
+        "Выберите, за какой период вы хотите посмотреть бронирования:",
+        keyboard=get_view_bookings_keyboard()
+    )
+
+
+@bot.on.message(text="📅 Брони на сегодня")
+async def process_today_bookings(message: Message):
+    today_str = datetime.now().strftime("%d.%m.%Y")
+    bookings = await db.get_bookings_by_date(today_str)
+    
+    text = format_bookings_list(bookings, today_str)
+    await message.answer(text, keyboard=get_view_bookings_keyboard())
+
+
+@bot.on.message(text="🔍 Выбрать конкретную дату")
+async def process_select_date_for_view(message: Message):
+    await bot.state_dispenser.set(message.peer_id, BookingState.VIEWING_DATE_SELECT)
+    await message.answer(
+        "Выберите дату для просмотра бронирований:",
+        keyboard=get_view_date_keyboard()
+    )
+
+
+@bot.on.message(state=BookingState.VIEWING_DATE_SELECT)
+async def process_view_date_selection(message: Message):
+    text = message.text
+    peer_id = message.peer_id
+
+    # Проверяем, что это команда назад
+    if "◀️ Назад" in text:
+        await bot.state_dispenser.set(peer_id, BookingState.VIEWING_BOOKINGS)
+        await message.answer(
+            "Выберите, за какой период вы хотите посмотреть бронирования:",
+            keyboard=get_view_bookings_keyboard()
+        )
+        return
+
+    # Извлекаем дату из текста
+    date_match = re.search(r'\d{2}\.\d{2}\.\d{4}', text)
+    if not date_match:
+        await message.answer("⚠️ Пожалуйста, выберите дату из списка:", keyboard=get_view_date_keyboard())
+        return
+
+    date_str = date_match.group()
+    bookings = await db.get_bookings_by_date(date_str)
+    
+    text = format_bookings_list(bookings, date_str)
+    await message.answer(text, keyboard=get_view_bookings_keyboard())
+    
+    # Возвращаем в состояние выбора периода
+    await bot.state_dispenser.set(peer_id, BookingState.VIEWING_BOOKINGS)
 
 
 @bot.on.message(text="📋 Мои бронирования")
@@ -203,6 +330,15 @@ async def process_my_bookings(message: Message):
 async def process_room_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
+
+    # Проверяем команду назад
+    if "◀️ Назад" in text:
+        await bot.state_dispenser.delete(peer_id)
+        await message.answer(
+            "Главное меню. Выберите действие:",
+            keyboard=get_main_menu_keyboard()
+        )
+        return
 
     room_id = None
     for rid, rdata in ROOMS.items():
@@ -244,6 +380,15 @@ async def process_date_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
 
+    # Проверяем команду назад
+    if "◀️ Назад" in text:
+        await bot.state_dispenser.set(peer_id, BookingState.SELECTING_ROOM)
+        await message.answer(
+            "🏢 Выберите переговорную комнату:",
+            keyboard=get_rooms_keyboard()
+        )
+        return
+
     date_match = re.search(r'\d{2}\.\d{2}\.\d{4}', text)
     if not date_match:
         await message.answer("⚠️ Пожалуйста, выберите дату из списка:", keyboard=get_date_keyboard())
@@ -278,6 +423,19 @@ async def process_time_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
 
+    # Проверяем команду назад
+    if "◀️ Назад" in text:
+        await bot.state_dispenser.set(peer_id, BookingState.SELECTING_DATE)
+        data = get_user_data(peer_id)
+        date_str = data.get("date_str", "")
+        room_id = data.get("room_id", "")
+        available_slots = await db.get_available_slots(date_str, room_id)
+        await message.answer(
+            f"📅 {date_str}\n\nВыберите дату:",
+            keyboard=get_date_keyboard()
+        )
+        return
+
     time_match = re.search(r'(\d{2}:\d{2})', text)
     if not time_match:
         await message.answer("⚠️ Пожалуйста, выберите время из списка:", keyboard=get_time_keyboard([]))
@@ -298,6 +456,19 @@ async def process_time_selection(message: Message):
 async def process_duration_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
+
+    # Проверяем команду назад
+    if "◀️ Назад" in text:
+        await bot.state_dispenser.set(peer_id, BookingState.SELECTING_START_TIME)
+        data = get_user_data(peer_id)
+        date_str = data.get("date_str", "")
+        room_id = data.get("room_id", "")
+        available_slots = await db.get_available_slots(date_str, room_id)
+        await message.answer(
+            f"📅 {date_str}\n\nВыберите время начала:",
+            keyboard=get_time_keyboard(available_slots)
+        )
+        return
 
     duration_map = {
         "30 минут": 30, "1 час": 60, "1.5 часа": 90,
@@ -389,8 +560,11 @@ async def process_confirm(message: Message):
     data = get_user_data(peer_id)
 
     try:
+        # Получаем имя пользователя через VK API
+        user_name = await get_user_name(message.from_id)
+
         booking_id = await db.create_booking(
-            user_name=str(message.from_id),
+            user_name=user_name,
             platform="VK",
             user_id=str(message.from_id),
             room_id=data["room_id"],
@@ -431,4 +605,3 @@ async def process_cancel_booking_help(message: Message):
         "Чтобы отменить бронирование, выберите его в разделе '📋 Мои бронирования'",
         keyboard=get_main_menu_keyboard()
     )
-
