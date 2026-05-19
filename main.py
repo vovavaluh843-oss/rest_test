@@ -6,14 +6,15 @@
 import asyncio
 import logging
 import sys
-import multiprocessing
-from multiprocessing import Process
+import subprocess
 
 from config import LOG_LEVEL, LOG_FORMAT
 
 
+vk_process = None
+
+
 def setup_logging():
-    """Настраивает логирование для всего приложения."""
     logging.basicConfig(
         level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
         format=LOG_FORMAT,
@@ -27,16 +28,44 @@ def setup_logging():
     logging.getLogger("gspread").setLevel(logging.WARNING)
 
 
-def run_vk_bot():
-    """Запускает VK-бота в отдельном процессе."""
-    import asyncio
-    setup_logging()
-    from vk_bot import start_vk_bot
-    asyncio.run(start_vk_bot())
+def start_vk_bot_subprocess():
+    global vk_process
+    python_executable = sys.executable
+    vk_process = subprocess.Popen(
+        [python_executable, "run_vk.py"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    logger = logging.getLogger(__name__)
+    logger.info(f"VK-бот запущен в отдельном процессе (PID: {vk_process.pid})")
+
+    def read_output():
+        for line in vk_process.stdout:
+            logging.getLogger("vk_bot").info(line.strip())
+
+    import threading
+    thread = threading.Thread(target=read_output, daemon=True)
+    thread.start()
+    return vk_process
+
+
+def stop_vk_bot():
+    global vk_process
+    logger = logging.getLogger(__name__)
+    if vk_process is not None and vk_process.poll() is None:
+        logger.info("Остановка VK-бота...")
+        vk_process.terminate()
+        try:
+            vk_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            vk_process.kill()
+            vk_process.wait()
+        logger.info("VK-бот остановлен")
 
 
 async def main():
-    """Главная корутина. Запускает TG-бота в основном процессе."""
     setup_logging()
     logger = logging.getLogger(__name__)
 
@@ -44,12 +73,8 @@ async def main():
     logger.info("Запуск системы бронирования переговорных комнат")
     logger.info("=" * 60)
 
-    # Запускаем VK-бота в отдельном процессе
-    vk_process = Process(target=run_vk_bot, name="VK-Bot-Process")
-    vk_process.start()
-    logger.info(f"VK-бот запущен в отдельном процессе (PID: {vk_process.pid})")
+    start_vk_bot_subprocess()
 
-    # Запускаем Telegram-бота в основном процессе
     from tg_bot import start_telegram_bot
 
     try:
@@ -60,17 +85,11 @@ async def main():
         logger.error(f"Ошибка Telegram-бота: {e}", exc_info=True)
         raise
     finally:
-        logger.info("Остановка VK-бота...")
-        if vk_process.is_alive():
-            vk_process.terminate()
-            vk_process.join(timeout=5)
-            if vk_process.is_alive():
-                vk_process.kill()
+        stop_vk_bot()
         logger.info("Система бронирования остановлена.")
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

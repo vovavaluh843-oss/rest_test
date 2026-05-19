@@ -28,7 +28,7 @@ class BookingState(BaseStateGroup):
     CONFIRMING = 6
 
 
-# КЛАВИАТУРЫ
+# === КЛАВИАТУРЫ ===
 
 def get_main_menu_keyboard():
     keyboard = Keyboard(one_time=False)
@@ -50,7 +50,6 @@ def get_rooms_keyboard():
 def get_date_keyboard():
     keyboard = Keyboard(one_time=False)
     today = datetime.now()
-
     for i in range(7):
         date_obj = today + timedelta(days=i)
         date_str = date_obj.strftime("%d.%m.%Y")
@@ -59,22 +58,19 @@ def get_date_keyboard():
             "Monday": "Пн", "Tuesday": "Вт", "Wednesday": "Ср",
             "Thursday": "Чт", "Friday": "Пт", "Saturday": "Сб", "Sunday": "Вс"
         }.get(day_name, day_name)
-
         if i == 0:
             label = f"Сегодня ({date_str})"
         elif i == 1:
             label = f"Завтра ({date_str})"
         else:
             label = f"{day_ru} ({date_str})"
-
         keyboard.add(label, color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
-
     keyboard.add("◀️ Назад к комнатам", color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
-def get_time_keyboard(available_slots: list):
+def get_time_keyboard(available_slots):
     keyboard = Keyboard(one_time=False)
     for start, end in available_slots[:8]:
         keyboard.add(f"🕐 {start}", color=KeyboardButtonColor.PRIMARY)
@@ -104,7 +100,7 @@ def get_confirm_keyboard():
     return keyboard
 
 
-def get_cancel_booking_keyboard(booking_id: int):
+def get_cancel_booking_keyboard(booking_id):
     keyboard = Keyboard(one_time=False)
     keyboard.add(f"❌ Отменить бронь #{booking_id}", color=KeyboardButtonColor.NEGATIVE)
     keyboard.row()
@@ -112,24 +108,24 @@ def get_cancel_booking_keyboard(booking_id: int):
     return keyboard
 
 
-# ХРАНИЛИЩЕ ДАННЫХ
+# === ХРАНИЛИЩЕ ДАННЫХ ===
 
-def get_user_data(peer_id: int) -> dict:
+def get_user_data(peer_id):
     data = storage.get(f"user_{peer_id}")
     return data or {}
 
 
-def set_user_data(peer_id: int, data: dict):
+def set_user_data(peer_id, data):
     storage.set(f"user_{peer_id}", data)
 
 
-def update_user_data(peer_id: int, **kwargs):
+def update_user_data(peer_id, **kwargs):
     data = get_user_data(peer_id)
     data.update(kwargs)
     set_user_data(peer_id, data)
 
 
-# ОБРАБОТЧИКИ
+# === ОБРАБОТЧИКИ ===
 
 @bot.on.message(text=["/start", "Начать", "Меню", "меню"])
 async def cmd_start(message: Message):
@@ -432,9 +428,9 @@ async def process_cancel_booking_help(message: Message):
     )
 
 
-# ЗАПУСК БОТА
+# === ЗАПУСК ===
 
-async def start_vk_bot():
-    """Запускает VK-бота (асинхронный метод)."""
+def start_vk_bot():
+    """Запускает VK-бота (синхронный метод для vkbottle 4.x)."""
     logger.info("Запуск VK-бота...")
-    await bot.run_polling()
+    bot.run_polling()

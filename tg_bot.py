@@ -1,6 +1,6 @@
 """
 Telegram-бот для системы бронирования переговорных комнат.
-Реализован на aiogram 3.x с использованием FSM для пошагового сценария.
+Реализован на aiogram 3.x с использованием FSM.
 """
 
 import logging
@@ -18,32 +18,30 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import TELEGRAM_BOT_TOKEN, ROOMS, MAX_BOOKING_HOURS, BOOKING_STEP_MINUTES
+from config import TELEGRAM_BOT_TOKEN, ROOMS
 from database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
 
-# Инициализация бота и диспетчера (включаем HTML-разметку)
+# Инициализация бота с HTML-разметкой
 bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 
 
-# Состояния для пошагового процесса бронирования
 class BookingStates(StatesGroup):
-    selecting_room = State()       # Выбор комнаты
-    selecting_date = State()       # Выбор даты
-    selecting_start_time = State() # Выбор времени начала
-    selecting_duration = State()   # Выбор длительности
-    entering_purpose = State()     # Ввод цели встречи
-    confirming = State()           # Подтверждение
+    selecting_room = State()
+    selecting_date = State()
+    selecting_start_time = State()
+    selecting_duration = State()
+    entering_purpose = State()
+    confirming = State()
 
 
-# Клавиатуры
+# === КЛАВИАТУРЫ ===
 
-def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Главное меню бота."""
+def get_main_menu_keyboard():
     buttons = [
         [InlineKeyboardButton(text="📅 Забронировать комнату", callback_data="book_room")],
         [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="my_bookings")],
@@ -51,25 +49,20 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_rooms_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора переговорной комнаты."""
+def get_rooms_keyboard():
     buttons = []
     for room_id, room_data in ROOMS.items():
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"🏢 {room_data['name']}",
-                callback_data=f"room:{room_id}"
-            )
-        ])
+        buttons.append([InlineKeyboardButton(
+            text=f"🏢 {room_data['name']}",
+            callback_data=f"room:{room_id}"
+        )])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_date_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора даты (сегодня, завтра, +5 дней)."""
+def get_date_keyboard():
     today = datetime.now()
     buttons = []
-
     for i in range(7):
         date_obj = today + timedelta(days=i)
         date_str = date_obj.strftime("%d.%m.%Y")
@@ -77,90 +70,66 @@ def get_date_keyboard() -> InlineKeyboardMarkup:
             "Monday", "Пн").replace("Tuesday", "Вт").replace(
             "Wednesday", "Ср").replace("Thursday", "Чт").replace(
             "Friday", "Пт").replace("Saturday", "Сб").replace("Sunday", "Вс")
-
         if i == 0:
             label = f"📅 Сегодня ({date_str})"
         elif i == 1:
             label = f"📅 Завтра ({date_str})"
         else:
             label = f"📅 {day_name} ({date_str})"
-
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"date:{date_str}")])
-
     buttons.append([InlineKeyboardButton(text="◀️ Назад к комнатам", callback_data="book_room")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_time_keyboard(available_slots: list, date_str: str) -> InlineKeyboardMarkup:
-    """Клавиатура выбора времени начала из доступных слотов."""
+def get_time_keyboard(available_slots, date_str):
     buttons = []
     row = []
     for start, end in available_slots:
-        btn = InlineKeyboardButton(
-            text=f"🕐 {start}",
-            callback_data=f"time:{start}"
-        )
-        row.append(btn)
+        row.append(InlineKeyboardButton(text=f"🕐 {start}", callback_data=f"time:{start}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
-
     buttons.append([InlineKeyboardButton(text="◀️ Назад к дате", callback_data="back_to_date")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_duration_keyboard(start_time: str) -> InlineKeyboardMarkup:
-    """Клавиатура выбора длительности бронирования."""
+def get_duration_keyboard(start_time):
     buttons = []
     durations = [
-        ("30 минут", 30),
-        ("1 час", 60),
-        ("1.5 часа", 90),
-        ("2 часа", 120),
-        ("2.5 часа", 150),
-        ("3 часа", 180),
+        ("30 минут", 30), ("1 час", 60), ("1.5 часа", 90),
+        ("2 часа", 120), ("2.5 часа", 150), ("3 часа", 180),
     ]
-
     row = []
     for label, minutes in durations:
-        btn = InlineKeyboardButton(text=label, callback_data=f"duration:{minutes}")
-        row.append(btn)
+        row.append(InlineKeyboardButton(text=label, callback_data=f"duration:{minutes}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
-
     buttons.append([InlineKeyboardButton(text="◀️ Назад ко времени", callback_data="back_to_time")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_confirm_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура подтверждения бронирования."""
-    buttons = [
-        [
-            InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_booking"),
-            InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_booking")
-        ]
-    ]
+def get_confirm_keyboard():
+    buttons = [[
+        InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_booking"),
+        InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_booking")
+    ]]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_cancel_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура для отмены конкретного бронирования."""
-    buttons = [
-        [InlineKeyboardButton(text="❌ Отменить бронь", callback_data=f"cancel:{booking_id}")]
-    ]
+def get_cancel_booking_keyboard(booking_id):
+    buttons = [[InlineKeyboardButton(text="❌ Отменить бронь", callback_data=f"cancel:{booking_id}")]]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-# Обработчики команд
+# === ОБРАБОТЧИКИ КОМАНД ===
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    """Обработчик команды /start."""
     await state.clear()
     await message.answer(
         "👋 Добро пожаловать в систему бронирования переговорных комнат!\n\n"
@@ -174,7 +143,6 @@ async def cmd_start(message: Message, state: FSMContext):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    """Обработчик команды /help."""
     await message.answer(
         "📖 <b>Помощь по системе бронирования</b>\n\n"
         "<b>Доступные команды:</b>\n"
@@ -192,11 +160,10 @@ async def cmd_help(message: Message):
     )
 
 
-# Обработчики главного меню
+# === ГЛАВНОЕ МЕНЮ ===
 
 @router.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: CallbackQuery, state: FSMContext):
-    """Возврат в главное меню."""
     await state.clear()
     await callback.message.edit_text(
         "Главное меню. Выберите действие:",
@@ -207,7 +174,6 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "book_room")
 async def process_book_room(callback: CallbackQuery, state: FSMContext):
-    """Начало процесса бронирования — выбор комнаты."""
     await state.set_state(BookingStates.selecting_room)
     await callback.message.edit_text(
         "🏢 Выберите переговорную комнату:",
@@ -216,11 +182,10 @@ async def process_book_room(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Выбор комнаты
+# === ВЫБОР КОМНАТЫ ===
 
-@router.callback_query(F.data.startswith("room:"), BookingStates.selecting_room)
+@router.callback_query(F.data.startswith("room:"))
 async def process_room_selection(callback: CallbackQuery, state: FSMContext):
-    """Обработка выбора комнаты — показ фото и описания."""
     room_id = callback.data.split(":")[1]
     room_data = ROOMS.get(room_id)
 
@@ -228,10 +193,11 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка: комната не найдена", show_alert=True)
         return
 
-    # Сохраняем выбор в состоянии
+    # ВАЖНО: сохраняем данные и состояние СРАЗУ, до отправки фото
     await state.update_data(room_id=room_id, room_name=room_data["name"])
+    await state.set_state(BookingStates.selecting_date)
+    await callback.answer()
 
-    # Формируем красивое описание
     features_text = "\n".join([f"  ✓ {f}" for f in room_data["features"]])
     caption = (
         f"<b>{room_data['name']}</b>\n\n"
@@ -241,28 +207,26 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
         f"Выберите дату бронирования:"
     )
 
-    # Отправляем фото с описанием
     try:
+        # Отправляем фото новым сообщением
         photo = FSInputFile(room_data["image_path"])
-        await callback.message.delete()
         await callback.message.answer_photo(
             photo=photo,
             caption=caption,
             reply_markup=get_date_keyboard()
         )
+        # Удаляем старое сообщение после успешной отправки
+        await callback.message.delete()
     except Exception as e:
         logger.error(f"Ошибка отправки фото: {e}")
+        # Если не удалось отправить фото — редактируем старое сообщение
         await callback.message.edit_text(caption, reply_markup=get_date_keyboard())
 
-    await state.set_state(BookingStates.selecting_date)
-    await callback.answer()
 
-
-# Выбор даты
+# === ВЫБОР ДАТЫ ===
 
 @router.callback_query(F.data == "back_to_date")
 async def process_back_to_date(callback: CallbackQuery, state: FSMContext):
-    """Возврат к выбору даты."""
     await state.set_state(BookingStates.selecting_date)
     await callback.message.edit_text(
         "📅 Выберите дату бронирования:",
@@ -271,25 +235,32 @@ async def process_back_to_date(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("date:"), BookingStates.selecting_date)
+@router.callback_query(F.data.startswith("date:"))
 async def process_date_selection(callback: CallbackQuery, state: FSMContext):
-    """Обработка выбора даты — показ доступных слотов."""
     date_str = callback.data.split(":")[1]
     await state.update_data(date_str=date_str)
 
     data = await state.get_data()
-    room_id = data["room_id"]
+    room_id = data.get("room_id")
 
-    # Получаем свободные слоты
+    if not room_id:
+        await callback.answer("Ошибка: комната не выбрана", show_alert=True)
+        await state.clear()
+        await callback.message.edit_text(
+            "Главное меню. Выберите действие:",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+
     available_slots = await db.get_available_slots(date_str, room_id)
 
     if not available_slots:
+        await callback.answer("Нет свободных слотов", show_alert=True)
         await callback.message.edit_text(
             f"📅 На {date_str} все слоты заняты.\n\n"
             f"Выберите другую дату:",
             reply_markup=get_date_keyboard()
         )
-        await callback.answer("Нет свободных слотов", show_alert=True)
         return
 
     await state.set_state(BookingStates.selecting_start_time)
@@ -301,11 +272,10 @@ async def process_date_selection(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Выбор времени начала
+# === ВЫБОР ВРЕМЕНИ ===
 
 @router.callback_query(F.data == "back_to_time")
 async def process_back_to_time(callback: CallbackQuery, state: FSMContext):
-    """Возврат к выбору времени."""
     data = await state.get_data()
     date_str = data.get("date_str", "")
     room_id = data.get("room_id", "")
@@ -320,9 +290,8 @@ async def process_back_to_time(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("time:"), BookingStates.selecting_start_time)
+@router.callback_query(F.data.startswith("time:"))
 async def process_time_selection(callback: CallbackQuery, state: FSMContext):
-    """Обработка выбора времени начала — выбор длительности."""
     start_time = callback.data.split(":")[1]
     await state.update_data(start_time=start_time)
 
@@ -335,11 +304,10 @@ async def process_time_selection(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Выбор длительности
+# === ВЫБОР ДЛИТЕЛЬНОСТИ ===
 
-@router.callback_query(F.data.startswith("duration:"), BookingStates.selecting_duration)
+@router.callback_query(F.data.startswith("duration:"))
 async def process_duration_selection(callback: CallbackQuery, state: FSMContext):
-    """Обработка выбора длительности — запрос цели встречи."""
     duration_minutes = int(callback.data.split(":")[1])
     await state.update_data(duration_minutes=duration_minutes)
 
@@ -347,7 +315,6 @@ async def process_duration_selection(callback: CallbackQuery, state: FSMContext)
     start_time = data["start_time"]
     date_str = data["date_str"]
 
-    # Вычисляем время окончания
     start_dt = datetime.strptime(f"{date_str} {start_time}", "%d.%m.%Y %H:%M")
     end_dt = start_dt + timedelta(minutes=duration_minutes)
     end_time = end_dt.strftime("%H:%M")
@@ -363,11 +330,10 @@ async def process_duration_selection(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
 
 
-# Ввод цели встречи
+# === ВВОД ЦЕЛИ ===
 
 @router.message(BookingStates.entering_purpose)
 async def process_purpose(message: Message, state: FSMContext):
-    """Обработка ввода цели встречи — показ подтверждения."""
     purpose = message.text.strip()
 
     if len(purpose) < 2:
@@ -381,7 +347,6 @@ async def process_purpose(message: Message, state: FSMContext):
     await state.update_data(purpose=purpose)
     data = await state.get_data()
 
-    # Формируем сводку для подтверждения
     summary = (
         f"📋 <b>Проверьте данные бронирования:</b>\n\n"
         f"🏢 Комната: <b>{data['room_name']}</b>\n"
@@ -395,11 +360,10 @@ async def process_purpose(message: Message, state: FSMContext):
     await message.answer(summary, reply_markup=get_confirm_keyboard())
 
 
-# Подтверждение / отмена бронирования
+# === ПОДТВЕРЖДЕНИЕ ===
 
-@router.callback_query(F.data == "cancel_booking", BookingStates.confirming)
+@router.callback_query(F.data == "cancel_booking")
 async def process_cancel_booking(callback: CallbackQuery, state: FSMContext):
-    """Отмена бронирования пользователем на этапе подтверждения."""
     await state.clear()
     await callback.message.edit_text(
         "❌ Бронирование отменено.\n\n"
@@ -409,9 +373,8 @@ async def process_cancel_booking(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Бронирование отменено")
 
 
-@router.callback_query(F.data == "confirm_booking", BookingStates.confirming)
+@router.callback_query(F.data == "confirm_booking")
 async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение и создание бронирования."""
     data = await state.get_data()
 
     try:
@@ -441,7 +404,6 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
     except BookingConflictError as e:
         await callback.answer(str(e), show_alert=True)
         await state.set_state(BookingStates.selecting_start_time)
-        # Показываем доступные слоты снова
         available_slots = await db.get_available_slots(data["date_str"], data["room_id"])
         await callback.message.edit_text(
             f"⚠️ {str(e)}\n\n"
@@ -463,11 +425,10 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Произошла ошибка. Попробуйте позже.", show_alert=True)
 
 
-# Мои бронирования
+# === МОИ БРОНИРОВАНИЯ ===
 
 @router.callback_query(F.data == "my_bookings")
 async def process_my_bookings(callback: CallbackQuery):
-    """Показать активные бронирования пользователя."""
     user_id = str(callback.from_user.id)
     bookings = await db.get_user_bookings(user_id, "TG")
 
@@ -496,7 +457,6 @@ async def process_my_bookings(callback: CallbackQuery):
         )
 
     first_booking_id = bookings[0]["ID брони"]
-
     await callback.message.edit_text(
         text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -509,7 +469,6 @@ async def process_my_bookings(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cancel:"))
 async def process_cancel_specific_booking(callback: CallbackQuery):
-    """Отмена конкретного бронирования."""
     try:
         booking_id = int(callback.data.split(":")[1])
     except (ValueError, IndexError):
@@ -533,11 +492,10 @@ async def process_cancel_specific_booking(callback: CallbackQuery):
         )
 
 
-# Регистрация роутера
+# === ЗАПУСК ===
+
 dp.include_router(router)
 
-
-# Запуск бота
 
 async def start_telegram_bot():
     """Запускает Telegram-бота в режиме long-polling."""
