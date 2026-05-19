@@ -432,9 +432,9 @@ async def process_cancel_booking_help(message: Message):
     )
 
 
-# ЗАПУСК БОТА — vkbottle.run_polling() синхронный!
+# ЗАПУСК БОТА
 
-def start_vk_bot():
-    """Запускает VK-бота (синхронный метод)."""
+async def start_vk_bot():
+    """Запускает VK-бота (асинхронный метод)."""
     logger.info("Запуск VK-бота...")
-    bot.run_polling()
+    await bot.run_polling()

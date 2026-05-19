@@ -29,9 +29,10 @@ def setup_logging():
 
 def run_vk_bot():
     """Запускает VK-бота в отдельном процессе."""
+    import asyncio
     setup_logging()
     from vk_bot import start_vk_bot
-    start_vk_bot()
+    asyncio.run(start_vk_bot())
 
 
 async def main():
