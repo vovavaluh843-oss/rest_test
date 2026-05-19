@@ -199,7 +199,10 @@ def format_bookings_list(bookings, date_str):
 @bot.on.message(text=["/start", "Начать", "Меню", "меню"])
 async def cmd_start(message: Message):
     set_user_data(message.peer_id, {})
-    await bot.state_dispenser.delete(message.peer_id)
+    try:
+        await bot.state_dispenser.delete(message.peer_id)
+    except KeyError:
+        pass  # Стейт может не существовать
     await message.answer(
         "👋 Добро пожаловать в систему бронирования переговорных комнат!\n\n"
         "Здесь вы можете:\n"
@@ -333,7 +336,10 @@ async def process_room_selection(message: Message):
 
     # Проверяем команду назад
     if "◀️ Назад" in text:
-        await bot.state_dispenser.delete(peer_id)
+        try:
+            await bot.state_dispenser.delete(peer_id)
+        except KeyError:
+            pass
         await message.answer(
             "Главное меню. Выберите действие:",
             keyboard=get_main_menu_keyboard()
@@ -545,7 +551,10 @@ async def process_confirm(message: Message):
 
     if "❌" in text or "Отменить" in text:
         set_user_data(peer_id, {})
-        await bot.state_dispenser.delete(peer_id)
+        try:
+            await bot.state_dispenser.delete(peer_id)
+        except KeyError:
+            pass
         await message.answer(
             "❌ Бронирование отменено.\n\n"
             "Выберите действие:",
@@ -575,7 +584,10 @@ async def process_confirm(message: Message):
         )
 
         set_user_data(peer_id, {})
-        await bot.state_dispenser.delete(peer_id)
+        try:
+            await bot.state_dispenser.delete(peer_id)
+        except KeyError:
+            pass
         await message.answer(
             f"✅ Бронирование успешно создано!\n\n"
             f"🏢 Комната: {data['room_name']}\n"
@@ -588,15 +600,24 @@ async def process_confirm(message: Message):
 
     except BookingConflictError as e:
         await message.answer(str(e), keyboard=get_main_menu_keyboard())
-        await bot.state_dispenser.delete(peer_id)
+        try:
+            await bot.state_dispenser.delete(peer_id)
+        except KeyError:
+            pass
     except ValidationError as e:
         set_user_data(peer_id, {})
-        await bot.state_dispenser.delete(peer_id)
+        try:
+            await bot.state_dispenser.delete(peer_id)
+        except KeyError:
+            pass
         await message.answer(f"⚠️ Ошибка: {str(e)}", keyboard=get_main_menu_keyboard())
     except Exception as e:
         logger.error(f"Ошибка создания бронирования: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже.", keyboard=get_main_menu_keyboard())
-        await bot.state_dispenser.delete(peer_id)
+        try:
+            await bot.state_dispenser.delete(peer_id)
+        except KeyError:
+            pass
 
 
 @bot.on.message(text="Отменить бронь")
