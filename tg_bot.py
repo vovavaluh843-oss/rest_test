@@ -164,28 +164,29 @@ async def cmd_help(message: Message):
 
 @router.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     await state.clear()
     await callback.message.edit_text(
         "Главное меню. Выберите действие:",
         reply_markup=get_main_menu_keyboard()
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "book_room")
 async def process_book_room(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     await state.set_state(BookingStates.selecting_room)
     await callback.message.edit_text(
         "🏢 Выберите переговорную комнату:",
         reply_markup=get_rooms_keyboard()
     )
-    await callback.answer()
 
 
 # === ВЫБОР КОМНАТЫ ===
 
 @router.callback_query(F.data.startswith("room:"))
 async def process_room_selection(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     room_id = callback.data.split(":")[1]
     room_data = ROOMS.get(room_id)
 
@@ -193,10 +194,8 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка: комната не найдена", show_alert=True)
         return
 
-    # ВАЖНО: сохраняем данные и состояние СРАЗУ, до отправки фото
     await state.update_data(room_id=room_id, room_name=room_data["name"])
     await state.set_state(BookingStates.selecting_date)
-    await callback.answer()
 
     features_text = "\n".join([f"  ✓ {f}" for f in room_data["features"]])
     caption = (
@@ -208,18 +207,15 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
     )
 
     try:
-        # Отправляем фото новым сообщением
         photo = FSInputFile(room_data["image_path"])
         await callback.message.answer_photo(
             photo=photo,
             caption=caption,
             reply_markup=get_date_keyboard()
         )
-        # Удаляем старое сообщение после успешной отправки
         await callback.message.delete()
     except Exception as e:
         logger.error(f"Ошибка отправки фото: {e}")
-        # Если не удалось отправить фото — редактируем старое сообщение
         await callback.message.edit_text(caption, reply_markup=get_date_keyboard())
 
 
@@ -227,16 +223,17 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_date")
 async def process_back_to_date(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     await state.set_state(BookingStates.selecting_date)
     await callback.message.edit_text(
         "📅 Выберите дату бронирования:",
         reply_markup=get_date_keyboard()
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("date:"))
 async def process_date_selection(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     date_str = callback.data.split(":")[1]
     await state.update_data(date_str=date_str)
 
@@ -244,7 +241,6 @@ async def process_date_selection(callback: CallbackQuery, state: FSMContext):
     room_id = data.get("room_id")
 
     if not room_id:
-        await callback.answer("Ошибка: комната не выбрана", show_alert=True)
         await state.clear()
         await callback.message.edit_text(
             "Главное меню. Выберите действие:",
@@ -255,7 +251,6 @@ async def process_date_selection(callback: CallbackQuery, state: FSMContext):
     available_slots = await db.get_available_slots(date_str, room_id)
 
     if not available_slots:
-        await callback.answer("Нет свободных слотов", show_alert=True)
         await callback.message.edit_text(
             f"📅 На {date_str} все слоты заняты.\n\n"
             f"Выберите другую дату:",
@@ -269,13 +264,13 @@ async def process_date_selection(callback: CallbackQuery, state: FSMContext):
         f"Выберите время начала встречи:",
         reply_markup=get_time_keyboard(available_slots, date_str)
     )
-    await callback.answer()
 
 
 # === ВЫБОР ВРЕМЕНИ ===
 
 @router.callback_query(F.data == "back_to_time")
 async def process_back_to_time(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     data = await state.get_data()
     date_str = data.get("date_str", "")
     room_id = data.get("room_id", "")
@@ -287,11 +282,11 @@ async def process_back_to_time(callback: CallbackQuery, state: FSMContext):
         f"Выберите время начала встречи:",
         reply_markup=get_time_keyboard(available_slots, date_str)
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("time:"))
 async def process_time_selection(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     start_time = callback.data.split(":")[1]
     await state.update_data(start_time=start_time)
 
@@ -301,13 +296,13 @@ async def process_time_selection(callback: CallbackQuery, state: FSMContext):
         f"Выберите длительность встречи:",
         reply_markup=get_duration_keyboard(start_time)
     )
-    await callback.answer()
 
 
 # === ВЫБОР ДЛИТЕЛЬНОСТИ ===
 
 @router.callback_query(F.data.startswith("duration:"))
 async def process_duration_selection(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Убираем загрузку первым делом!
     duration_minutes = int(callback.data.split(":")[1])
     await state.update_data(duration_minutes=duration_minutes)
 
@@ -327,7 +322,6 @@ async def process_duration_selection(callback: CallbackQuery, state: FSMContext)
         f"🕐 {start_time} — {end_time}\n\n"
         f"Введите цель встречи (краткое описание):"
     )
-    await callback.answer()
 
 
 # === ВВОД ЦЕЛИ ===
@@ -364,17 +358,18 @@ async def process_purpose(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "cancel_booking")
 async def process_cancel_booking(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("Бронирование отменено")  # Убираем загрузку первым делом!
     await state.clear()
     await callback.message.edit_text(
         "❌ Бронирование отменено.\n\n"
         "Выберите действие:",
         reply_markup=get_main_menu_keyboard()
     )
-    await callback.answer("Бронирование отменено")
 
 
 @router.callback_query(F.data == "confirm_booking")
 async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("Создаем бронирование...")  # Убираем загрузку первым делом!
     data = await state.get_data()
 
     try:
@@ -399,7 +394,6 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
             f"Ждем вас на встрече!",
             reply_markup=get_main_menu_keyboard()
         )
-        await callback.answer("Бронирование создано!")
 
     except BookingConflictError as e:
         await callback.answer(str(e), show_alert=True)
@@ -429,6 +423,7 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "my_bookings")
 async def process_my_bookings(callback: CallbackQuery):
+    await callback.answer()  # Убираем загрузку первым делом!
     user_id = str(callback.from_user.id)
     bookings = await db.get_user_bookings(user_id, "TG")
 
@@ -441,7 +436,6 @@ async def process_my_bookings(callback: CallbackQuery):
                 [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
             ])
         )
-        await callback.answer()
         return
 
     text = "📋 <b>Ваши активные бронирования:</b>\n\n"
@@ -464,11 +458,11 @@ async def process_my_bookings(callback: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
         ])
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("cancel:"))
 async def process_cancel_specific_booking(callback: CallbackQuery):
+    await callback.answer("Отменяем бронирование...")  # Убираем загрузку первым делом!
     try:
         booking_id = int(callback.data.split(":")[1])
     except (ValueError, IndexError):
@@ -484,7 +478,6 @@ async def process_cancel_specific_booking(callback: CallbackQuery):
             f"Выберите действие:",
             reply_markup=get_main_menu_keyboard()
         )
-        await callback.answer("Бронирование отменено")
     else:
         await callback.answer(
             "Не удалось отменить бронирование. Возможно, оно уже прошло или не существует.",

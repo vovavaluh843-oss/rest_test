@@ -1,20 +1,17 @@
 """
 Главный файл для запуска системы бронирования переговорных комнат.
-Запускает Telegram-бота и VK-бота в отдельных процессах.
+Запускает Telegram-бота и VK-бота параллельно в одном event loop.
 """
 
 import asyncio
 import logging
 import sys
-import subprocess
 
 from config import LOG_LEVEL, LOG_FORMAT
 
 
-vk_process = None
-
-
 def setup_logging():
+    """Настраивает логирование для всего приложения."""
     logging.basicConfig(
         level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
         format=LOG_FORMAT,
@@ -28,44 +25,8 @@ def setup_logging():
     logging.getLogger("gspread").setLevel(logging.WARNING)
 
 
-def start_vk_bot_subprocess():
-    global vk_process
-    python_executable = sys.executable
-    vk_process = subprocess.Popen(
-        [python_executable, "run_vk.py"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
-    logger = logging.getLogger(__name__)
-    logger.info(f"VK-бот запущен в отдельном процессе (PID: {vk_process.pid})")
-
-    def read_output():
-        for line in vk_process.stdout:
-            logging.getLogger("vk_bot").info(line.strip())
-
-    import threading
-    thread = threading.Thread(target=read_output, daemon=True)
-    thread.start()
-    return vk_process
-
-
-def stop_vk_bot():
-    global vk_process
-    logger = logging.getLogger(__name__)
-    if vk_process is not None and vk_process.poll() is None:
-        logger.info("Остановка VK-бота...")
-        vk_process.terminate()
-        try:
-            vk_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            vk_process.kill()
-            vk_process.wait()
-        logger.info("VK-бот остановлен")
-
-
 async def main():
+    """Главная корутина. Запускает TG и VK ботов параллельно."""
     setup_logging()
     logger = logging.getLogger(__name__)
 
@@ -73,19 +34,28 @@ async def main():
     logger.info("Запуск системы бронирования переговорных комнат")
     logger.info("=" * 60)
 
-    start_vk_bot_subprocess()
+    # Импортируем ботов
+    from tg_bot import dp, bot as tg_bot
+    from vk_bot import start_vk_bot
 
-    from tg_bot import start_telegram_bot
+    # Создаем задачу для polling VK-бота внутри текущего loop
+    vk_task = asyncio.create_task(start_vk_bot())
 
+    # Запускаем polling Telegram-бота (drop_pending пропускает старые спам-апдейты)
+    await tg_bot.delete_webhook(drop_pending_updates=True)
+    tg_task = asyncio.create_task(dp.start_polling(tg_bot))
+
+    logger.info("Система успешно запущена: TG и VK боты работают!")
+
+    # Ждем завершения обеих задач (если одна упадет — другая тоже завершится)
     try:
-        await start_telegram_bot()
-    except KeyboardInterrupt:
-        logger.info("Получен сигнал завершения. Остановка системы...")
+        await asyncio.gather(vk_task, tg_task)
+    except asyncio.CancelledError:
+        logger.info("Получен сигнал завершения...")
     except Exception as e:
-        logger.error(f"Ошибка Telegram-бота: {e}", exc_info=True)
+        logger.error(f"Ошибка в работе ботов: {e}", exc_info=True)
         raise
     finally:
-        stop_vk_bot()
         logger.info("Система бронирования остановлена.")
 
 
