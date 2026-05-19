@@ -196,7 +196,7 @@ def format_bookings_list(bookings, date_str):
 
 # === ОБРАБОТЧИКИ ===
 
-@bot.on.message(text=["/start", "Начать", "Меню", "меню"])
+@bot.on.message(text=["/start", "Начать", "Меню", "меню", "◀️ Главное меню"])
 async def cmd_start(message: Message):
     set_user_data(message.peer_id, {})
     try:
