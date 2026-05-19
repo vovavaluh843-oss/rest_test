@@ -322,6 +322,10 @@ async def process_duration_selection(message: Message):
     start_time = data["start_time"]
     date_str = data["date_str"]
 
+    # Защита: если время пришло без минут, добавляем :00
+    if start_time and ":" not in str(start_time):
+        start_time = f"{start_time}:00"
+
     start_dt = datetime.strptime(f"{date_str} {start_time}", "%d.%m.%Y %H:%M")
     end_dt = start_dt + timedelta(minutes=duration_minutes)
     end_time = end_dt.strftime("%H:%M")

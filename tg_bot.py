@@ -351,7 +351,7 @@ async def process_back_to_time(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("time:"))
 async def process_time_selection(callback: CallbackQuery, state: FSMContext):
     await callback.answer()  # Убираем загрузку первым делом!
-    start_time = callback.data.split(":")[1]
+    start_time = callback.data.split(":", 1)[1]
     await state.update_data(start_time=start_time)
 
     await state.set_state(BookingStates.selecting_duration)
