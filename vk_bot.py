@@ -15,6 +15,9 @@ from database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
 
+# === ИНИЦИАЛИЗАЦИЯ БОТА ===
+# Bot создает свой loop_wrapper при инициализации.
+# Запуск управляется из main.py через vk_bot.run_polling()
 bot = Bot(token=VK_BOT_TOKEN)
 storage = CtxStorage()
 
@@ -426,11 +429,3 @@ async def process_cancel_booking_help(message: Message):
         "Чтобы отменить бронирование, выберите его в разделе '📋 Мои бронирования'",
         keyboard=get_main_menu_keyboard()
     )
-
-
-# === ЗАПУСК ===
-
-async def start_vk_bot():
-    """Запускает VK-бота (асинхронный метод для vkbottle 4.x)."""
-    logger.info("Запуск VK-бота...")
-    await bot.run_polling()

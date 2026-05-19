@@ -1,9 +1,12 @@
 """
 Главный файл для запуска системы бронирования переговорных комнат.
-Запускает Telegram-бота и VK-бота параллельно в одном event loop.
+
+Стратегия запуска:
+- vkbottle управляет event loop через свой loop_wrapper.
+- Telegram-бот добавляется как задача в loop_wrapper VK-бота.
+- Оба бота работают параллельно в одном event loop.
 """
 
-import asyncio
 import logging
 import sys
 
@@ -25,8 +28,8 @@ def setup_logging():
     logging.getLogger("gspread").setLevel(logging.WARNING)
 
 
-async def main():
-    """Главная корутина. Запускает TG и VK ботов параллельно."""
+def main():
+    """Главная функция запуска. Синхронная — управление отдается loop_wrapper vkbottle."""
     setup_logging()
     logger = logging.getLogger(__name__)
 
@@ -35,33 +38,25 @@ async def main():
     logger.info("=" * 60)
 
     # Импортируем ботов
+    # При импорте tg_bot регистрируются все обработчики
     from tg_bot import dp, bot as tg_bot
-    from vk_bot import start_vk_bot
+    from vk_bot import bot as vk_bot
 
-    # Создаем задачу для polling VK-бота внутри текущего loop
-    vk_task = asyncio.create_task(start_vk_bot())
+    # Добавляем Telegram polling как задачу в loop_wrapper VK-бота.
+    # Так оба бота работают в одном event loop под управлением vkbottle.
+    logger.info("Добавление Telegram-бота в loop_wrapper VK-бота...")
+    vk_bot.loop_wrapper.add_task(dp.start_polling(tg_bot))
 
-    # Запускаем polling Telegram-бота (drop_pending пропускает старые спам-апдейты)
-    await tg_bot.delete_webhook(drop_pending_updates=True)
-    tg_task = asyncio.create_task(dp.start_polling(tg_bot))
+    logger.info("Система успешно инициализирована! Запускаем VK и TG ботов...")
 
-    logger.info("Система успешно запущена: TG и VK боты работают!")
-
-    # Ждем завершения обеих задач (если одна упадет — другая тоже завершится)
-    try:
-        await asyncio.gather(vk_task, tg_task)
-    except asyncio.CancelledError:
-        logger.info("Получен сигнал завершения...")
-    except Exception as e:
-        logger.error(f"Ошибка в работе ботов: {e}", exc_info=True)
-        raise
-    finally:
-        logger.info("Система бронирования остановлена.")
+    # Запускаем VK-бота. Он добавит свою задачу polling в loop_wrapper
+    # и вызовет loop_wrapper.run(), который запустит ОБЕ задачи параллельно.
+    vk_bot.run_polling()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         print("\nСистема остановлена пользователем.")
         sys.exit(0)
