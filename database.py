@@ -199,6 +199,16 @@ class GoogleSheetsDB:
         ]
         return filtered
 
+    async def get_bookings_by_date(self, date_str):
+        """Получает все бронирования на конкретную дату."""
+        await self.connect()
+        all_bookings = await self.get_all_bookings()
+        filtered = [
+            booking for booking in all_bookings
+            if booking.get("Дата") == date_str
+        ]
+        return filtered
+
     async def get_user_bookings(self, user_id, platform):
         """Получает активные бронирования пользователя."""
         await self.connect()
