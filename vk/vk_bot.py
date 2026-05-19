@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timedelta
 
 from vkbottle.bot import Bot, Message
+from vkbottle.bot.rules import Regex
 from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
 
 from config import VK_BOT_TOKEN, ROOMS
@@ -618,6 +619,39 @@ async def process_confirm(message: Message):
             await bot.state_dispenser.delete(peer_id)
         except KeyError:
             pass
+
+
+@bot.on.message(Regex(r"❌ Отменить бронь #(\d+)"))
+async def process_cancel_booking_by_id(message: Message):
+    """Обработчик отмены бронирования по ID из кнопки."""
+    # Извлекаем ID брони из текста сообщения
+    match = re.search(r"#(\d+)", message.text)
+    if not match:
+        await message.answer("⚠️ Не удалось определить номер бронирования.")
+        return
+
+    booking_id = int(match.group(1))
+    user_id = str(message.from_id)
+
+    try:
+        success = await db.cancel_booking(booking_id, user_id, "VK")
+        if success:
+            await message.answer(
+                f"✅ Бронирование #{booking_id} успешно отменено!",
+                keyboard=get_main_menu_keyboard()
+            )
+        else:
+            await message.answer(
+                f"❌ Не удалось найти или отменить бронирование #{booking_id}.\n"
+                f"Возможно, оно уже прошло или было отменено.",
+                keyboard=get_main_menu_keyboard()
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при отмене бронирования: {e}")
+        await message.answer(
+            f"⚠️ Произошла ошибка при отмене: {e}",
+            keyboard=get_main_menu_keyboard()
+        )
 
 
 @bot.on.message(text="Отменить бронь")
