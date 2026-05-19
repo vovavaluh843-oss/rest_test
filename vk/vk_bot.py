@@ -620,7 +620,7 @@ async def process_confirm(message: Message):
             pass
 
 
-@bot.on.message(F.text.contains("Отменить бронь #"))
+@bot.on.message(func=lambda msg: msg.text and "Отменить бронь #" in msg.text)
 async def process_cancel_booking_by_id(message: Message):
     """Обработчик отмены бронирования по ID из кнопки."""
     # Извлекаем ID брони из текста сообщения
