@@ -481,27 +481,37 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
     photo_msg_id = data.get("photo_message_id")
     photo_chat_id = data.get("photo_chat_id")
 
+    # Безопасно получаем данные из сохраненного состояния
+    room_id = data.get("room_id") or data.get("room") or "glass_openspace"
+    room_name = data.get("room_name") or ROOMS.get(room_id, {}).get("name", "Переговорная")
+    date_str = data.get("date_str") or "—"
+    start_time = data.get("start_time") or "—"
+    end_time = data.get("end_time") or "—"
+    purpose = data.get("purpose") or "—"
+
     try:
         booking_id = await db.create_booking(
             user_name=callback.from_user.full_name or callback.from_user.username or "Пользователь",
             platform="TG",
             user_id=str(callback.from_user.id),
-            room_id=data["room_id"],
-            date_str=data["date_str"],
-            start_time_str=data["start_time"],
-            end_time_str=data["end_time"],
-            purpose=data["purpose"]
+            room_id=room_id,
+            date_str=date_str,
+            start_time_str=start_time,
+            end_time_str=end_time,
+            purpose=purpose
         )
 
-        await state.clear()
+        # Формируем финальное сообщение ПЕРЕД очисткой стейта
         caption = (
-            f"✅ <b>Бронирование успешно создано!</b>\n\n"
-            f"🏢 Комната: <b>{data['room_name']}</b>\n"
-            f"📅 Дата: <b>{data['date_str']}</b>\n"
-            f"🕐 Время: <b>{data['start_time']} — {data['end_time']}</b>\n"
-            f"🆔 Номер брони: <b>#{booking_id}</b>\n\n"
+            f"🎉 <b>Успешно забронировано!</b>\n\n"
+            f"📍 <b>Комната:</b> {room_name}\n"
+            f"📅 <b>Дата:</b> {date_str}\n"
+            f"⏰ <b>Время:</b> {start_time} — {end_time}\n"
+            f"🆔 <b>Номер брони:</b> #{booking_id}\n\n"
             f"Ждем вас на встрече!"
         )
+
+        # Отправляем сообщение через edit_caption (так как сообщение с фото)
         if photo_msg_id and photo_chat_id:
             await bot.edit_message_caption(
                 chat_id=photo_chat_id,
@@ -515,27 +525,29 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
                 reply_markup=get_main_menu_keyboard()
             )
 
+        # Очищаем стейт ПОСЛЕ отправки сообщения
+        await state.clear()
+
     except BookingConflictError as e:
         await callback.answer(str(e), show_alert=True)
         await state.set_state(BookingStates.selecting_start_time)
-        available_slots = await db.get_available_slots(data["date_str"], data["room_id"])
+        available_slots = await db.get_available_slots(date_str, room_id)
         caption = f"⚠️ {str(e)}\n\nВыберите другое время:"
         if photo_msg_id and photo_chat_id:
             await bot.edit_message_caption(
                 chat_id=photo_chat_id,
                 message_id=photo_msg_id,
                 caption=caption,
-                reply_markup=get_time_keyboard(available_slots, data["date_str"])
+                reply_markup=get_time_keyboard(available_slots, date_str)
             )
         else:
             await callback.message.edit_text(
                 caption,
-                reply_markup=get_time_keyboard(available_slots, data["date_str"])
+                reply_markup=get_time_keyboard(available_slots, date_str)
             )
 
     except ValidationError as e:
         await callback.answer(str(e), show_alert=True)
-        await state.clear()
         caption = f"⚠️ Ошибка: {str(e)}\n\nПопробуйте снова:"
         if photo_msg_id and photo_chat_id:
             await bot.edit_message_caption(
@@ -549,6 +561,7 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
                 caption,
                 reply_markup=get_main_menu_keyboard()
             )
+        await state.clear()
 
     except Exception as e:
         logger.error(f"Ошибка создания бронирования: {e}")
