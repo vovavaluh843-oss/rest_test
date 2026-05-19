@@ -176,10 +176,23 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext):
 async def process_book_room(callback: CallbackQuery, state: FSMContext):
     await callback.answer()  # Убираем загрузку первым делом!
     await state.set_state(BookingStates.selecting_room)
-    await callback.message.edit_text(
-        "🏢 Выберите переговорную комнату:",
-        reply_markup=get_rooms_keyboard()
-    )
+
+    data = await state.get_data()
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+    
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption="🏢 Выберите переговорную комнату:",
+            reply_markup=get_rooms_keyboard()
+        )
+    else:
+        await callback.message.edit_text(
+            "🏢 Выберите переговорную комнату:",
+            reply_markup=get_rooms_keyboard()
+        )
 
 
 # === ВЫБОР КОМНАТЫ ===
@@ -373,6 +386,10 @@ async def process_duration_selection(callback: CallbackQuery, state: FSMContext)
     data = await state.get_data()
     start_time = data["start_time"]
     date_str = data["date_str"]
+
+    # Если в start_time пришел только час (например, "11"), превращаем его в "11:00"
+    if ":" not in start_time:
+        start_time = f"{start_time}:00"
 
     start_dt = datetime.strptime(f"{date_str} {start_time}", "%d.%m.%Y %H:%M")
     end_dt = start_dt + timedelta(minutes=duration_minutes)
