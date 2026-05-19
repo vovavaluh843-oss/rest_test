@@ -38,6 +38,7 @@ class BookingStates(StatesGroup):
     selecting_duration = State()
     entering_purpose = State()
     confirming = State()
+    viewing_bookings_date = State()  # Состояние для просмотра броней на дату
 
 
 # === КЛАВИАТУРЫ ===
@@ -48,6 +49,7 @@ def get_main_reply_keyboard():
         keyboard=[
             [KeyboardButton(text="📅 Забронировать комнату")],
             [KeyboardButton(text="📋 Брони на сегодня")],
+            [KeyboardButton(text="📅 Брони на дату")],
             [KeyboardButton(text="📋 Мои бронирования")],
         ],
         resize_keyboard=True,
@@ -59,8 +61,31 @@ def get_main_menu_inline_keyboard():
     buttons = [
         [InlineKeyboardButton(text="📅 Забронировать комнату", callback_data="book_room")],
         [InlineKeyboardButton(text="📋 Брони на сегодня", callback_data="today_bookings")],
+        [InlineKeyboardButton(text="📅 Брони на дату", callback_data="view_date_menu")],
         [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="my_bookings")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_view_date_keyboard():
+    """Клавиатура для выбора даты просмотра броней."""
+    today = datetime.now()
+    buttons = []
+    for i in range(7):
+        date_obj = today + timedelta(days=i)
+        date_str = date_obj.strftime("%d.%m.%Y")
+        day_name = date_obj.strftime("%A").replace(
+            "Monday", "Пн").replace("Tuesday", "Вт").replace(
+            "Wednesday", "Ср").replace("Thursday", "Чт").replace(
+            "Friday", "Пт").replace("Saturday", "Сб").replace("Sunday", "Вс")
+        if i == 0:
+            label = f"📅 Сегодня ({date_str})"
+        elif i == 1:
+            label = f"📅 Завтра ({date_str})"
+        else:
+            label = f"📅 {day_name} ({date_str})"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"view_date:{date_str}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -212,6 +237,15 @@ async def reply_today_bookings(message: Message):
     await message.answer(text, reply_markup=get_main_reply_keyboard())
 
 
+@router.message(F.text == "📅 Брони на дату")
+async def reply_view_bookings_date(message: Message, state: FSMContext):
+    await state.set_state(BookingStates.viewing_bookings_date)
+    await message.answer(
+        "📅 Выберите дату для просмотра бронирований:",
+        reply_markup=get_view_date_keyboard()
+    )
+
+
 @router.message(F.text == "📋 Мои бронирования")
 async def reply_my_bookings(message: Message):
     user_id = str(message.from_user.id)
@@ -307,6 +341,46 @@ async def process_today_bookings(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_main_menu_inline_keyboard())
 
 
+@router.callback_query(F.data == "view_date_menu")
+async def process_view_date_menu(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(BookingStates.viewing_bookings_date)
+    await callback.message.edit_text(
+        "📅 Выберите дату для просмотра бронирований:",
+        reply_markup=get_view_date_keyboard()
+    )
+
+
+# === ПРОСМОТР БРОНЕЙ НА ДАТУ ===
+
+@router.callback_query(F.data.startswith("view_date:"))
+async def process_view_date_selection(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    date_str = callback.data.split(":", 1)[1]
+    bookings = await db.get_bookings_by_date(date_str)
+
+    if not bookings:
+        await callback.message.edit_text(
+            f"📅 <b>Бронирования на {date_str}:</b>\n\n"
+            f"На эту дату бронирований пока нет. Вы можете стать первым!",
+            reply_markup=get_main_menu_inline_keyboard()
+        )
+        await state.clear()
+        return
+
+    text = f"📅 <b>Бронирования на {date_str}:</b>\n\n"
+    for booking in bookings:
+        room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
+        username = booking.get("Имя", "—")
+        text += (
+            f"• <b>{booking['Время Начала']} — {booking['Время Конца']}</b> | "
+            f"{room_name} ({username})\n"
+        )
+
+    await callback.message.edit_text(text, reply_markup=get_main_menu_inline_keyboard())
+    await state.clear()
+
+
 # === ВЫБОР КОМНАТЫ ===
 
 @router.callback_query(F.data.startswith("room:"))
@@ -355,7 +429,7 @@ async def process_back_to_date(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     photo_msg_id = data.get("photo_message_id")
     photo_chat_id = data.get("photo_chat_id")
-    
+
     if photo_msg_id and photo_chat_id:
         await bot.edit_message_caption(
             chat_id=photo_chat_id,
