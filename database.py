@@ -246,7 +246,7 @@ class GoogleSheetsDB:
         Алгоритм: валидация -> блокировка комнаты -> повторная проверка -> запись.
         """
         # Валидация времени
-        await self.validate_booking_time(date_str, start_time_str, end_time_str)
+        self.validate_booking_time(date_str, start_time_str, end_time_str)
 
         # Очистка пользовательских данных
         safe_name = self.sanitize_input(user_name)

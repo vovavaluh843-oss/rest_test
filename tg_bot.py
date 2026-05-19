@@ -453,17 +453,33 @@ async def process_purpose(message: Message, state: FSMContext):
 async def process_cancel_booking(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Бронирование отменено")  # Убираем загрузку первым делом!
     await state.clear()
-    await callback.message.edit_text(
-        "❌ Бронирование отменено.\n\n"
-        "Выберите действие:",
-        reply_markup=get_main_menu_keyboard()
-    )
+
+    data = await state.get_data()
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption="❌ Бронирование отменено.\n\nВыберите действие:",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Бронирование отменено.\n\n"
+            "Выберите действие:",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 
 @router.callback_query(F.data == "confirm_booking")
 async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Создаем бронирование...")  # Убираем загрузку первым делом!
     data = await state.get_data()
+
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
 
     try:
         booking_id = await db.create_booking(
@@ -478,34 +494,61 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
         )
 
         await state.clear()
-        await callback.message.edit_text(
+        caption = (
             f"✅ <b>Бронирование успешно создано!</b>\n\n"
             f"🏢 Комната: <b>{data['room_name']}</b>\n"
             f"📅 Дата: <b>{data['date_str']}</b>\n"
             f"🕐 Время: <b>{data['start_time']} — {data['end_time']}</b>\n"
             f"🆔 Номер брони: <b>#{booking_id}</b>\n\n"
-            f"Ждем вас на встрече!",
-            reply_markup=get_main_menu_keyboard()
+            f"Ждем вас на встрече!"
         )
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=get_main_menu_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=get_main_menu_keyboard()
+            )
 
     except BookingConflictError as e:
         await callback.answer(str(e), show_alert=True)
         await state.set_state(BookingStates.selecting_start_time)
         available_slots = await db.get_available_slots(data["date_str"], data["room_id"])
-        await callback.message.edit_text(
-            f"⚠️ {str(e)}\n\n"
-            f"Выберите другое время:",
-            reply_markup=get_time_keyboard(available_slots, data["date_str"])
-        )
+        caption = f"⚠️ {str(e)}\n\nВыберите другое время:"
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=get_time_keyboard(available_slots, data["date_str"])
+            )
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=get_time_keyboard(available_slots, data["date_str"])
+            )
 
     except ValidationError as e:
         await callback.answer(str(e), show_alert=True)
         await state.clear()
-        await callback.message.edit_text(
-            f"⚠️ Ошибка: {str(e)}\n\n"
-            f"Попробуйте снова:",
-            reply_markup=get_main_menu_keyboard()
-        )
+        caption = f"⚠️ Ошибка: {str(e)}\n\nПопробуйте снова:"
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=get_main_menu_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=get_main_menu_keyboard()
+            )
 
     except Exception as e:
         logger.error(f"Ошибка создания бронирования: {e}")
@@ -515,26 +558,36 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
 # === МОИ БРОНИРОВАНИЯ ===
 
 @router.callback_query(F.data == "my_bookings")
-async def process_my_bookings(callback: CallbackQuery):
+async def process_my_bookings(callback: CallbackQuery, state: FSMContext):
     await callback.answer()  # Убираем загрузку первым делом!
     user_id = str(callback.from_user.id)
     bookings = await db.get_user_bookings(user_id, "TG")
 
+    data = await state.get_data()
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+
     if not bookings:
-        await callback.message.edit_text(
-            "📋 У вас пока нет активных бронирований.\n\n"
-            "Хотите забронировать комнату?",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📅 Забронировать", callback_data="book_room")],
-                [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
-            ])
-        )
+        caption = "📋 У вас пока нет активных бронирований.\n\nХотите забронировать комнату?"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📅 Забронировать", callback_data="book_room")],
+            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
+        ])
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(caption, reply_markup=keyboard)
         return
 
-    text = "📋 <b>Ваши активные бронирования:</b>\n\n"
+    caption = "📋 <b>Ваши активные бронирования:</b>\n\n"
     for booking in bookings:
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
-        text += (
+        caption += (
             f"🆔 <b>#{booking['ID брони']}</b>\n"
             f"🏢 {room_name}\n"
             f"📅 {booking['Дата']}\n"
@@ -544,17 +597,24 @@ async def process_my_bookings(callback: CallbackQuery):
         )
 
     first_booking_id = bookings[0]["ID брони"]
-    await callback.message.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отменить последнюю бронь", callback_data=f"cancel:{first_booking_id}")],
-            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
-        ])
-    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отменить последнюю бронь", callback_data=f"cancel:{first_booking_id}")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
+    ])
+
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption=caption,
+            reply_markup=keyboard
+        )
+    else:
+        await callback.message.edit_text(caption, reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("cancel:"))
-async def process_cancel_specific_booking(callback: CallbackQuery):
+async def process_cancel_specific_booking(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Отменяем бронирование...")  # Убираем загрузку первым делом!
     try:
         booking_id = int(callback.data.split(":")[1])
@@ -565,12 +625,24 @@ async def process_cancel_specific_booking(callback: CallbackQuery):
     user_id = str(callback.from_user.id)
     success = await db.cancel_booking(booking_id, user_id, "TG")
 
+    data = await state.get_data()
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+
     if success:
-        await callback.message.edit_text(
-            f"✅ Бронирование <b>#{booking_id}</b> успешно отменено.\n\n"
-            f"Выберите действие:",
-            reply_markup=get_main_menu_keyboard()
-        )
+        caption = f"✅ Бронирование <b>#{booking_id}</b> успешно отменено.\n\nВыберите действие:"
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=get_main_menu_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=get_main_menu_keyboard()
+            )
     else:
         await callback.answer(
             "Не удалось отменить бронирование. Возможно, оно уже прошло или не существует.",
