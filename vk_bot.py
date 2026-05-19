@@ -432,13 +432,3 @@ async def process_cancel_booking_help(message: Message):
         keyboard=get_main_menu_keyboard()
     )
 
-
-# === ТЕСТОВЫЙ ХЭНДЛЕР ДЛЯ ОТЛАДКИ ===
-
-@bot.on.message()
-async def echo_handler(message: Message):
-    logger.info(f"[VK LOG] Получено сообщение от id{message.from_id}: {message.text}")
-    await message.answer(
-        f"Привет! Я получил твое сообщение: '{message.text}'.\n"
-        f"Система бронирования ВК в процессе отладки."
-    )
