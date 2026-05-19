@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timedelta
 
 from vkbottle.bot import Bot, Message
-from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage
+from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
 
 from config import VK_BOT_TOKEN, ROOMS
 from database import db, BookingConflictError, ValidationError
@@ -16,8 +16,6 @@ from database import db, BookingConflictError, ValidationError
 logger = logging.getLogger(__name__)
 
 # === ИНИЦИАЛИЗАЦИЯ БОТА ===
-# Bot создает свой loop_wrapper при инициализации.
-# Запуск управляется из main.py через vk_bot.run_polling()
 bot = Bot(token=VK_BOT_TOKEN)
 storage = CtxStorage()
 
@@ -35,18 +33,18 @@ class BookingState(BaseStateGroup):
 
 def get_main_menu_keyboard():
     keyboard = Keyboard(one_time=False)
-    keyboard.add("📅 Забронировать комнату", color=KeyboardButtonColor.PRIMARY)
+    keyboard.add(Text("📅 Забронировать комнату"), color=KeyboardButtonColor.PRIMARY)
     keyboard.row()
-    keyboard.add("📋 Мои бронирования", color=KeyboardButtonColor.SECONDARY)
+    keyboard.add(Text("📋 Мои бронирования"), color=KeyboardButtonColor.SECONDARY)
     return keyboard
 
 
 def get_rooms_keyboard():
     keyboard = Keyboard(one_time=False)
     for room_id, room_data in ROOMS.items():
-        keyboard.add(f"🏢 {room_data['name']}", color=KeyboardButtonColor.PRIMARY)
+        keyboard.add(Text(f"🏢 {room_data['name']}"), color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
-    keyboard.add("◀️ Назад", color=KeyboardButtonColor.NEGATIVE)
+    keyboard.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
@@ -67,18 +65,18 @@ def get_date_keyboard():
             label = f"Завтра ({date_str})"
         else:
             label = f"{day_ru} ({date_str})"
-        keyboard.add(label, color=KeyboardButtonColor.PRIMARY)
+        keyboard.add(Text(label), color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
-    keyboard.add("◀️ Назад к комнатам", color=KeyboardButtonColor.NEGATIVE)
+    keyboard.add(Text("◀️ Назад к комнатам"), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
 def get_time_keyboard(available_slots):
     keyboard = Keyboard(one_time=False)
     for start, end in available_slots[:8]:
-        keyboard.add(f"🕐 {start}", color=KeyboardButtonColor.PRIMARY)
+        keyboard.add(Text(f"🕐 {start}"), color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
-    keyboard.add("◀️ Назад к дате", color=KeyboardButtonColor.NEGATIVE)
+    keyboard.add(Text("◀️ Назад к дате"), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
@@ -89,25 +87,25 @@ def get_duration_keyboard():
         ("2 часа", 120), ("2.5 часа", 150), ("3 часа", 180),
     ]
     for label, minutes in durations:
-        keyboard.add(label, color=KeyboardButtonColor.PRIMARY)
+        keyboard.add(Text(label), color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
-    keyboard.add("◀️ Назад ко времени", color=KeyboardButtonColor.NEGATIVE)
+    keyboard.add(Text("◀️ Назад ко времени"), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
 def get_confirm_keyboard():
     keyboard = Keyboard(one_time=False)
-    keyboard.add("✅ Подтвердить", color=KeyboardButtonColor.POSITIVE)
+    keyboard.add(Text("✅ Подтвердить"), color=KeyboardButtonColor.POSITIVE)
     keyboard.row()
-    keyboard.add("❌ Отменить", color=KeyboardButtonColor.NEGATIVE)
+    keyboard.add(Text("❌ Отменить"), color=KeyboardButtonColor.NEGATIVE)
     return keyboard
 
 
 def get_cancel_booking_keyboard(booking_id):
     keyboard = Keyboard(one_time=False)
-    keyboard.add(f"❌ Отменить бронь #{booking_id}", color=KeyboardButtonColor.NEGATIVE)
+    keyboard.add(Text(f"❌ Отменить бронь #{booking_id}"), color=KeyboardButtonColor.NEGATIVE)
     keyboard.row()
-    keyboard.add("◀️ Главное меню", color=KeyboardButtonColor.SECONDARY)
+    keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
     return keyboard
 
 
@@ -175,9 +173,9 @@ async def process_my_bookings(message: Message):
 
     if not bookings:
         keyboard = Keyboard(one_time=False)
-        keyboard.add("📅 Забронировать", color=KeyboardButtonColor.PRIMARY)
+        keyboard.add(Text("📅 Забронировать"), color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
-        keyboard.add("◀️ Главное меню", color=KeyboardButtonColor.SECONDARY)
+        keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
         await message.answer(
             "📋 У вас пока нет активных бронирований.\n\n"
             "Хотите забронировать комнату?",
@@ -432,4 +430,15 @@ async def process_cancel_booking_help(message: Message):
     await message.answer(
         "Чтобы отменить бронирование, выберите его в разделе '📋 Мои бронирования'",
         keyboard=get_main_menu_keyboard()
+    )
+
+
+# === ТЕСТОВЫЙ ХЭНДЛЕР ДЛЯ ОТЛАДКИ ===
+
+@bot.on.message()
+async def echo_handler(message: Message):
+    logger.info(f"[VK LOG] Получено сообщение от id{message.from_id}: {message.text}")
+    await message.answer(
+        f"Привет! Я получил твое сообщение: '{message.text}'.\n"
+        f"Система бронирования ВК в процессе отладки."
     )
