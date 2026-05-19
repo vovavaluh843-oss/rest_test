@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import os
 import re
 import logging
 from datetime import datetime, timedelta
@@ -29,6 +30,11 @@ from config import (
     WORK_DAY_END,
     ROOMS,
 )
+
+# Получаем абсолютный путь к папке data/, где лежит текущий database.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+KEY_FILE_NAME = "service_account.json"
+CREDENTIALS_PATH = os.path.join(BASE_DIR, KEY_FILE_NAME)
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +93,7 @@ class GoogleSheetsDB:
 
         try:
             credentials = ServiceAccountCredentials.from_json_keyfile_name(
-                GOOGLE_SERVICE_ACCOUNT_FILE,
+                CREDENTIALS_PATH,
                 scopes=[
                     'https://spreadsheets.google.com/feeds',
                     'https://www.googleapis.com/auth/drive'
