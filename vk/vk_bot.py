@@ -8,8 +8,7 @@ import re
 from datetime import datetime, timedelta
 
 from vkbottle.bot import Bot, Message
-from vkbottle.bot.rules import Regex
-from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
+from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text, F
 
 from config import VK_BOT_TOKEN, ROOMS
 from data.database import db, BookingConflictError, ValidationError
@@ -621,7 +620,7 @@ async def process_confirm(message: Message):
             pass
 
 
-@bot.on.message(Regex(r"❌ Отменить бронь #(\d+)"))
+@bot.on.message(F.text.contains("Отменить бронь #"))
 async def process_cancel_booking_by_id(message: Message):
     """Обработчик отмены бронирования по ID из кнопки."""
     # Извлекаем ID брони из текста сообщения
