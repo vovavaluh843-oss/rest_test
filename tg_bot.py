@@ -208,11 +208,15 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
 
     try:
         photo = FSInputFile(room_data["image_path"])
-        await callback.message.answer_photo(
+        # Отправляем фото и сохраняем ID сообщения для последующего редактирования caption
+        sent_message = await callback.message.answer_photo(
             photo=photo,
             caption=caption,
             reply_markup=get_date_keyboard()
         )
+        # Сохраняем ID сообщения и chat_id для редактирования caption
+        await state.update_data(photo_message_id=sent_message.message_id, photo_chat_id=sent_message.chat.id)
+        # Удаляем исходное сообщение с кнопкой выбора комнаты
         await callback.message.delete()
     except Exception as e:
         logger.error(f"Ошибка отправки фото: {e}")
@@ -225,10 +229,23 @@ async def process_room_selection(callback: CallbackQuery, state: FSMContext):
 async def process_back_to_date(callback: CallbackQuery, state: FSMContext):
     await callback.answer()  # Убираем загрузку первым делом!
     await state.set_state(BookingStates.selecting_date)
-    await callback.message.edit_text(
-        "📅 Выберите дату бронирования:",
-        reply_markup=get_date_keyboard()
-    )
+    
+    data = await state.get_data()
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+    
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption="📅 Выберите дату бронирования:",
+            reply_markup=get_date_keyboard()
+        )
+    else:
+        await callback.message.edit_text(
+            "📅 Выберите дату бронирования:",
+            reply_markup=get_date_keyboard()
+        )
 
 
 @router.callback_query(F.data.startswith("date:"))
@@ -251,19 +268,41 @@ async def process_date_selection(callback: CallbackQuery, state: FSMContext):
     available_slots = await db.get_available_slots(date_str, room_id)
 
     if not available_slots:
-        await callback.message.edit_text(
-            f"📅 На {date_str} все слоты заняты.\n\n"
-            f"Выберите другую дату:",
-            reply_markup=get_date_keyboard()
-        )
+        # Редактируем caption у сообщения с фото
+        photo_msg_id = data.get("photo_message_id")
+        photo_chat_id = data.get("photo_chat_id")
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=f"📅 На {date_str} все слоты заняты.\n\nВыберите другую дату:",
+                reply_markup=get_date_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                f"📅 На {date_str} все слоты заняты.\n\n"
+                f"Выберите другую дату:",
+                reply_markup=get_date_keyboard()
+            )
         return
 
     await state.set_state(BookingStates.selecting_start_time)
-    await callback.message.edit_text(
-        f"📅 <b>{date_str}</b>\n\n"
-        f"Выберите время начала встречи:",
-        reply_markup=get_time_keyboard(available_slots, date_str)
-    )
+    # Редактируем caption у сообщения с фото
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption=f"📅 <b>{date_str}</b>\n\nВыберите время начала встречи:",
+            reply_markup=get_time_keyboard(available_slots, date_str)
+        )
+    else:
+        await callback.message.edit_text(
+            f"📅 <b>{date_str}</b>\n\n"
+            f"Выберите время начала встречи:",
+            reply_markup=get_time_keyboard(available_slots, date_str)
+        )
 
 
 # === ВЫБОР ВРЕМЕНИ ===
@@ -277,11 +316,23 @@ async def process_back_to_time(callback: CallbackQuery, state: FSMContext):
 
     available_slots = await db.get_available_slots(date_str, room_id)
     await state.set_state(BookingStates.selecting_start_time)
-    await callback.message.edit_text(
-        f"📅 <b>{date_str}</b>\n\n"
-        f"Выберите время начала встречи:",
-        reply_markup=get_time_keyboard(available_slots, date_str)
-    )
+    
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+    
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption=f"📅 <b>{date_str}</b>\n\nВыберите время начала встречи:",
+            reply_markup=get_time_keyboard(available_slots, date_str)
+        )
+    else:
+        await callback.message.edit_text(
+            f"📅 <b>{date_str}</b>\n\n"
+            f"Выберите время начала встречи:",
+            reply_markup=get_time_keyboard(available_slots, date_str)
+        )
 
 
 @router.callback_query(F.data.startswith("time:"))
@@ -291,11 +342,24 @@ async def process_time_selection(callback: CallbackQuery, state: FSMContext):
     await state.update_data(start_time=start_time)
 
     await state.set_state(BookingStates.selecting_duration)
-    await callback.message.edit_text(
-        f"🕐 Начало: <b>{start_time}</b>\n\n"
-        f"Выберите длительность встречи:",
-        reply_markup=get_duration_keyboard(start_time)
-    )
+    
+    data = await state.get_data()
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+    
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption=f"🕐 Начало: <b>{start_time}</b>\n\nВыберите длительность встречи:",
+            reply_markup=get_duration_keyboard(start_time)
+        )
+    else:
+        await callback.message.edit_text(
+            f"🕐 Начало: <b>{start_time}</b>\n\n"
+            f"Выберите длительность встречи:",
+            reply_markup=get_duration_keyboard(start_time)
+        )
 
 
 # === ВЫБОР ДЛИТЕЛЬНОСТИ ===
@@ -317,11 +381,23 @@ async def process_duration_selection(callback: CallbackQuery, state: FSMContext)
     await state.update_data(end_time=end_time)
 
     await state.set_state(BookingStates.entering_purpose)
-    await callback.message.edit_text(
-        f"⏱ Длительность: <b>{duration_minutes} мин.</b>\n"
-        f"🕐 {start_time} — {end_time}\n\n"
-        f"Введите цель встречи (краткое описание):"
-    )
+    
+    photo_msg_id = data.get("photo_message_id")
+    photo_chat_id = data.get("photo_chat_id")
+    
+    if photo_msg_id and photo_chat_id:
+        await bot.edit_message_caption(
+            chat_id=photo_chat_id,
+            message_id=photo_msg_id,
+            caption=f"⏱ Длительность: <b>{duration_minutes} мин.</b>\n🕐 {start_time} — {end_time}\n\nВведите цель встречи (краткое описание):",
+            reply_markup=None  # Убираем клавиатуру, так как ждём текст
+        )
+    else:
+        await callback.message.edit_text(
+            f"⏱ Длительность: <b>{duration_minutes} мин.</b>\n"
+            f"🕐 {start_time} — {end_time}\n\n"
+            f"Введите цель встречи (краткое описание):"
+        )
 
 
 # === ВВОД ЦЕЛИ ===

@@ -19,7 +19,7 @@ async def start_telegram():
     """Запускает Telegram-бота через aiogram polling."""
     try:
         logger.info("Инициализация Telegram-бота...")
-        await tg_bot.delete_webhook(drop_pending=True)
+        await tg_bot.delete_webhook(drop_pending_updates=True)
         logger.info("Telegram-бот успешно запущен в режиме Polling!")
         await dp.start_polling(tg_bot)
     except Exception as e:
