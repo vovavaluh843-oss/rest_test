@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timedelta
 
 from vkbottle.bot import Bot, Message
-from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text, F
+from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
 
 from config import VK_BOT_TOKEN, ROOMS
 from data.database import db, BookingConflictError, ValidationError
