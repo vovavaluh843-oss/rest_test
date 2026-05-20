@@ -659,3 +659,36 @@ async def process_cancel_booking_help(message: Message):
         "Чтобы отменить бронирование, выберите его в разделе '📋 Мои бронирования'",
         keyboard=get_main_menu_keyboard()
     )
+
+
+@bot.on.message(func=lambda msg: msg.text and (msg.text.startswith("TGVK") and len(msg.text) == 8))
+async def process_auth_code(message: Message):
+    """Обработчик кодов авторизации для связки аккаунтов."""
+    auth_code = message.text.strip()
+    vk_id = str(message.from_id)
+    
+    try:
+        success = await db.link_vk_account(vk_id, auth_code)
+        
+        if success:
+            await message.answer(
+                f"🎉 <b>Аккаунты успешно связаны!</b>\n\n"
+                f"Теперь вам доступны все ваши бронирования из Telegram.\n"
+                f"Вы можете использовать одного бота для управления всеми бронями.",
+                keyboard=get_main_menu_keyboard()
+            )
+        else:
+            await message.answer(
+                f"❌ <b>Неверный или устаревший код</b>\n\n"
+                f"Убедитесь, что:\n"
+                f"• Код введён правильно (например: TGVK1234)\n"
+                f"• Код не старше 10 минут\n\n"
+                f"Попробуйте снова или получите новый код в Telegram-боте.",
+                keyboard=get_main_menu_keyboard()
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при связке аккаунтов: {e}")
+        await message.answer(
+            f"⚠️ Произошла ошибка. Попробуйте позже.",
+            keyboard=get_main_menu_keyboard()
+        )

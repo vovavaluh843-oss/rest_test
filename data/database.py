@@ -31,6 +31,10 @@ from config import (
     ROOMS,
 )
 
+# Название листа для авторизации пользователей
+USERS_AUTH_SHEET_NAME = "users_auth"
+AUTH_CODE_EXPIRY_MINUTES = 10  # Время жизни кода авторизации
+
 # Получаем абсолютный путь к папке data/, где лежит текущий database.py
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE_NAME = "service_account.json"
@@ -84,6 +88,7 @@ class GoogleSheetsDB:
         self._client = None
         self._spreadsheet = None
         self._bookings_sheet = None
+        self._users_auth_sheet = None
         self._initialized = True
 
     async def connect(self):
@@ -107,6 +112,12 @@ class GoogleSheetsDB:
             except gspread.WorksheetNotFound:
                 self._bookings_sheet = await self._create_bookings_sheet()
 
+            # Инициализация листа пользователей
+            try:
+                self._users_auth_sheet = self._spreadsheet.worksheet(USERS_AUTH_SHEET_NAME)
+            except gspread.WorksheetNotFound:
+                self._users_auth_sheet = await self._create_users_auth_sheet()
+
             logger.info("Успешное подключение к Google Sheets")
         except Exception as e:
             logger.error(f"Ошибка подключения к Google Sheets: {e}")
@@ -123,6 +134,21 @@ class GoogleSheetsDB:
                    "Переговорка", "Дата", "Время Начала", "Время Конца", "Цель"]
         sheet.append_row(headers)
         sheet.format('A1:I1', {
+            'textFormat': {'bold': True},
+            'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+        })
+        return sheet
+
+    async def _create_users_auth_sheet(self):
+        """Создает лист users_auth с заголовками."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_create_users_auth_sheet)
+
+    def _sync_create_users_auth_sheet(self):
+        sheet = self._spreadsheet.add_worksheet(title=USERS_AUTH_SHEET_NAME, rows=1000, cols=5)
+        headers = ["telegram_id", "vk_id", "name", "auth_code", "code_expires"]
+        sheet.append_row(headers)
+        sheet.format('A1:E1', {
             'textFormat': {'bold': True},
             'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
         })
@@ -216,15 +242,22 @@ class GoogleSheetsDB:
         return filtered
 
     async def get_user_bookings(self, user_id, platform):
-        """Получает активные бронирования пользователя."""
+        """Получает активные бронирования пользователя (с проверкой связанных аккаунтов)."""
         await self.connect()
-        all_bookings = await self.get_all_bookings()
+        
+        # Получаем связанные ID аккаунтов
+        linked_ids = await self.get_linked_user_ids(user_id, platform)
+        
         now = datetime.now()
         user_bookings = []
 
-        for booking in all_bookings:
-            if (str(booking.get("ID пользователя")) == str(user_id) and
-                    booking.get("Платформа") == platform):
+        for booking in await self.get_all_bookings():
+            # Проверяем, принадлежит ли бронь любому из связанных ID
+            booking_user_id = str(booking.get("ID пользователя", ""))
+            booking_platform = booking.get("Платформа", "")
+            
+            # Бронь принадлежит пользователю, если ID совпадает И платформа совпадает
+            if booking_user_id in linked_ids and booking_platform == platform:
                 try:
                     date_str = booking.get("Дата", "")
                     end_time_str = booking.get("Время Конца", "")
@@ -234,6 +267,136 @@ class GoogleSheetsDB:
                 except (ValueError, TypeError):
                     continue
         return user_bookings
+
+    async def get_linked_user_ids(self, user_id, platform):
+        """Получает список связанных ID для пользователя (для кросс-платформенного доступа)."""
+        await self.connect()
+        linked_ids = {str(user_id)}  # Всегда включаем текущий ID
+        
+        try:
+            records = await self._get_all_users_auth()
+            for record in records:
+                tg_id = str(record.get("telegram_id", ""))
+                vk_id = str(record.get("vk_id", ""))
+                
+                if platform == "TG":
+                    # Если текущий Telegram ID найден, добавляем VK ID
+                    if tg_id == str(user_id) and vk_id:
+                        linked_ids.add(vk_id)
+                elif platform == "VK":
+                    # Если текущий VK ID найден, добавляем Telegram ID
+                    if vk_id == str(user_id) and tg_id:
+                        linked_ids.add(tg_id)
+        except Exception as e:
+            logger.error(f"Ошибка при получении связанных ID: {e}")
+        
+        return linked_ids
+
+    async def _get_all_users_auth(self):
+        """Получает все записи из таблицы пользователей."""
+        try:
+            records = await self.connect() or self._users_auth_sheet
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._sync_get_all_users_auth)
+        except Exception:
+            return []
+
+    def _sync_get_all_users_auth(self):
+        try:
+            return self._users_auth_sheet.get_all_records()
+        except Exception:
+            return []
+
+    async def generate_auth_code(self, telegram_id: str, name: str) -> str:
+        """
+        Генерирует 6-значный код авторизации для связки аккаунтов.
+        Сохраняет в таблицу users_auth с истекающим временем.
+        """
+        await self.connect()
+        
+        # Генерируем случайный код
+        import random
+        code = f"TGVK{random.randint(1000, 9999)}"
+        expires = datetime.now() + timedelta(minutes=AUTH_CODE_EXPIRY_MINUTES)
+        expires_str = expires.strftime("%d.%m.%Y %H:%M")
+        
+        # Проверяем, есть ли уже активный код для этого telegram_id
+        existing = await self._get_user_auth_record(telegram_id)
+        
+        loop = asyncio.get_event_loop()
+        if existing:
+            # Обновляем существующую запись
+            await loop.run_in_executor(
+                None, self._sync_update_user_auth, telegram_id, name, code, expires_str)
+        else:
+            # Создаем новую запись
+            await loop.run_in_executor(
+                None, self._sync_append_user_auth, telegram_id, "", name, code, expires_str)
+        
+        logger.info(f"Сгенерирован код {code} для Telegram ID {telegram_id}")
+        return code
+
+    async def _get_user_auth_record(self, telegram_id: str):
+        """Получает запись авторизации для telegram_id."""
+        try:
+            records = await self._get_all_users_auth()
+            for record in records:
+                if str(record.get("telegram_id", "")) == str(telegram_id):
+                    return record
+        except Exception:
+            pass
+        return None
+
+    def _sync_update_user_auth(self, telegram_id: str, vk_id: str, name: str, code: str, expires: str):
+        """Обновляет запись авторизации."""
+        all_values = self._users_auth_sheet.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) >= 1 and str(row[0]) == str(telegram_id):
+                self._users_auth_sheet.update(f'A{idx}:E{idx}', [[telegram_id, vk_id, name, code, expires]])
+                return
+
+    def _sync_append_user_auth(self, telegram_id: str, vk_id: str, name: str, code: str, expires: str):
+        """Добавляет новую запись авторизации."""
+        self._users_auth_sheet.append_row([telegram_id, vk_id, name, code, expires])
+
+    async def link_vk_account(self, vk_id: str, auth_code: str) -> bool:
+        """
+        Связывает VK аккаунт с найденным по коду Telegram аккаунтом.
+        Возвращает True при успехе.
+        """
+        await self.connect()
+        
+        # Проверяем, не истёк ли код
+        records = await self._get_all_users_auth()
+        for record in records:
+            if str(record.get("auth_code", "")) == auth_code:
+                expires_str = record.get("code_expires", "")
+                try:
+                    expires = datetime.strptime(expires_str, "%d.%m.%Y %H:%M")
+                    if datetime.now() > expires:
+                        # Код истёк - удаляем запись
+                        self._sync_delete_user_auth_by_code(auth_code)
+                        return False
+                    
+                    # Обновляем запись, записывая vk_id
+                    telegram_id = str(record.get("telegram_id", ""))
+                    name = str(record.get("name", ""))
+                    self._sync_update_user_auth(telegram_id, vk_id, name, auth_code, expires_str)
+                    
+                    logger.info(f"Связаны аккаунты: TG={telegram_id}, VK={vk_id}")
+                    return True
+                except (ValueError, TypeError):
+                    continue
+        
+        return False
+
+    def _sync_delete_user_auth_by_code(self, auth_code: str):
+        """Удаляет запись авторизации по коду."""
+        all_values = self._users_auth_sheet.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) >= 4 and row[3] == auth_code:
+                self._users_auth_sheet.delete_rows(idx)
+                return
 
     async def check_slot_availability(self, date_str, room_id, start_time_str, end_time_str):
         """Проверяет, свободен ли слот для бронирования."""

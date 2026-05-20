@@ -51,6 +51,7 @@ def get_main_reply_keyboard():
             [KeyboardButton(text="📋 Брони на сегодня")],
             [KeyboardButton(text="📅 Брони на дату")],
             [KeyboardButton(text="📋 Мои бронирования")],
+            [KeyboardButton(text="🔗 Привязать ВКонтакте")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -63,6 +64,7 @@ def get_main_menu_inline_keyboard():
         [InlineKeyboardButton(text="📋 Брони на сегодня", callback_data="today_bookings")],
         [InlineKeyboardButton(text="📅 Брони на дату", callback_data="view_date_menu")],
         [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="my_bookings")],
+        [InlineKeyboardButton(text="🔗 Привязать ВКонтакте", callback_data="link_vk")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -349,6 +351,57 @@ async def process_view_date_menu(callback: CallbackQuery, state: FSMContext):
         "📅 Выберите дату для просмотра бронирований:",
         reply_markup=get_view_date_keyboard()
     )
+
+
+@router.callback_query(F.data == "link_vk")
+async def process_link_vk(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = str(callback.from_user.id)
+    user_name = callback.from_user.username or callback.from_user.first_name or "Пользователь"
+    
+    try:
+        auth_code = await db.generate_auth_code(user_id, user_name)
+        
+        await callback.message.edit_text(
+            f"🔗 <b>Привязка аккаунта ВКонтакте</b>\n\n"
+            f"Ваш код авторизации: <code>{auth_code}</code>\n\n"
+            f"1. Перейдите в нашего бота ВК\n"
+            f"2. Отправьте ему этот код\n"
+            f"3. Код действует 10 минут\n\n"
+            f"После привязки ваши бронирования из Telegram будут доступны в ВК!",
+            reply_markup=get_main_menu_inline_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка генерации кода авторизации: {e}")
+        await callback.message.edit_text(
+            "⚠️ Произошла ошибка при генерации кода. Попробуйте позже.",
+            reply_markup=get_main_menu_inline_keyboard()
+        )
+
+
+@router.message(F.text == "🔗 Привязать ВКонтакте")
+async def reply_link_vk(message: Message, state: FSMContext):
+    user_id = str(message.from_user.id)
+    user_name = message.from_user.username or message.from_user.first_name or "Пользователь"
+    
+    try:
+        auth_code = await db.generate_auth_code(user_id, user_name)
+        
+        await message.answer(
+            f"🔗 <b>Привязка аккаунта ВКонтакте</b>\n\n"
+            f"Ваш код авторизации: <code>{auth_code}</code>\n\n"
+            f"1. Перейдите в нашего бота ВК\n"
+            f"2. Отправьте ему этот код\n"
+            f"3. Код действует 10 минут\n\n"
+            f"После привязки ваши бронирования из Telegram будут доступны в ВК!",
+            reply_markup=get_main_reply_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка генерации кода авторизации: {e}")
+        await message.answer(
+            "⚠️ Произошла ошибка при генерации кода. Попробуйте позже.",
+            reply_markup=get_main_reply_keyboard()
+        )
 
 
 # === ПРОСМОТР БРОНЕЙ НА ДАТУ ===
