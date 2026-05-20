@@ -245,7 +245,7 @@ class GoogleSheetsDB:
         """Получает активные бронирования пользователя (с проверкой связанных аккаунтов)."""
         await self.connect()
         
-        # Получаем связанные ID аккаунтов
+        # Получаем связанные ID аккаунтов (и TG, и VK)
         linked_ids = await self.get_linked_user_ids(user_id, platform)
         
         now = datetime.now()
@@ -254,10 +254,9 @@ class GoogleSheetsDB:
         for booking in await self.get_all_bookings():
             # Проверяем, принадлежит ли бронь любому из связанных ID
             booking_user_id = str(booking.get("ID пользователя", ""))
-            booking_platform = booking.get("Платформа", "")
             
-            # Бронь принадлежит пользователю, если ID совпадает И платформа совпадает
-            if booking_user_id in linked_ids and booking_platform == platform:
+            # Бронь принадлежит пользователю, если ID совпадает (не важно какая платформа)
+            if booking_user_id in linked_ids:
                 try:
                     date_str = booking.get("Дата", "")
                     end_time_str = booking.get("Время Конца", "")
@@ -496,24 +495,26 @@ class GoogleSheetsDB:
         self._bookings_sheet.append_row(row_data)
 
     async def cancel_booking(self, booking_id, user_id, platform):
-        """Отменяет бронирование пользователя."""
+        """Отменяет бронирование пользователя по ID брони."""
         await self.connect()
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._sync_cancel_booking, booking_id, user_id, platform)
 
     def _sync_cancel_booking(self, booking_id, user_id, platform):
+        """Удаляет строку бронирования из таблицы."""
         all_values = self._bookings_sheet.get_all_values()
         for idx, row in enumerate(all_values[1:], start=2):
             if len(row) < 4:
                 continue
             try:
                 row_id = int(row[0])
-                row_platform = row[2]
                 row_user_id = str(row[3])
-                if row_id == booking_id and row_platform == platform and row_user_id == str(user_id):
+                
+                # Проверяем ID брони и ID пользователя (платформа не важна для связанных аккаунтов)
+                if row_id == booking_id and row_user_id == str(user_id):
                     self._bookings_sheet.delete_rows(idx)
-                    logger.info(f"Бронирование #{booking_id} отменено")
+                    logger.info(f"Бронирование #{booking_id} отменено пользователем {user_id}")
                     return True
             except (ValueError, IndexError):
                 continue

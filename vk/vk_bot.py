@@ -187,8 +187,19 @@ def format_bookings_list(bookings, date_str):
     for booking in bookings:
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
         username = booking.get("Имя", "—")
+        
+        # Нормализуем время - гарантируем формат HH:MM
+        start_time = str(booking.get("Время Начала", ""))
+        end_time = str(booking.get("Время Конца", ""))
+        
+        # Если время без минут, добавляем :00
+        if ":" not in start_time:
+            start_time = f"{start_time}:00"
+        if ":" not in end_time:
+            end_time = f"{end_time}:00"
+        
         text += (
-            f"• {booking['Время Начала']} — {booking['Время Конца']} | "
+            f"• {start_time} — {end_time} | "
             f"{room_name} ({username})\n"
         )
     return text
@@ -316,11 +327,20 @@ async def process_my_bookings(message: Message):
     text = "📋 Ваши активные бронирования:\n\n"
     for booking in bookings:
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
+        
+        # Нормализуем время
+        start_time = str(booking.get("Время Начала", ""))
+        end_time = str(booking.get("Время Конца", ""))
+        if ":" not in start_time:
+            start_time = f"{start_time}:00"
+        if ":" not in end_time:
+            end_time = f"{end_time}:00"
+        
         text += (
             f"🆔 #{booking['ID брони']}\n"
             f"🏢 {room_name}\n"
             f"📅 {booking['Дата']}\n"
-            f"🕐 {booking['Время Начала']} — {booking['Время Конца']}\n"
+            f"🕐 {start_time} — {end_time}\n"
             f"📝 {booking['Цель']}\n"
             f"——————————————\n"
         )
