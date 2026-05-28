@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
 
-from config import VK_BOT_TOKEN, ROOMS
+from config import VK_BOT_TOKEN, ROOMS, TIMEZONE
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def get_view_bookings_keyboard():
 def get_view_date_keyboard():
     """Клавиатура для выбора даты просмотра броней."""
     keyboard = Keyboard(one_time=False)
-    today = datetime.now()
+    today = datetime.now(TIMEZONE)
     for i in range(7):
         date_obj = today + timedelta(days=i)
         date_str = date_obj.strftime("%d.%m.%Y")
@@ -89,7 +89,7 @@ def get_rooms_keyboard():
 
 def get_date_keyboard():
     keyboard = Keyboard(one_time=False)
-    today = datetime.now()
+    today = datetime.now(TIMEZONE)
     for i in range(7):
         date_obj = today + timedelta(days=i)
         date_str = date_obj.strftime("%d.%m.%Y")
@@ -261,7 +261,7 @@ async def process_view_bookings(message: Message):
 
 @bot.on.message(text="📅 Брони на сегодня")
 async def process_today_bookings(message: Message):
-    today_str = datetime.now().strftime("%d.%m.%Y")
+    today_str = datetime.now(TIMEZONE).strftime("%d.%m.%Y")
     bookings = await db.get_bookings_by_date(today_str)
     
     text = format_bookings_list(bookings, today_str)

@@ -13,7 +13,7 @@ import asyncio
 import os
 import re
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any, Tuple
 
 import gspread
@@ -29,6 +29,7 @@ from config import (
     WORK_DAY_START,
     WORK_DAY_END,
     ROOMS,
+    TIMEZONE,
 )
 
 # Название листа для авторизации пользователей
@@ -181,7 +182,7 @@ class GoogleSheetsDB:
         except ValueError:
             raise ValidationError("Неверный формат даты или времени")
 
-        now = datetime.now()
+        now = datetime.now(TIMEZONE)
         start_dt = datetime.combine(date_obj, start_time)
         end_dt = datetime.combine(date_obj, end_time)
 
@@ -248,7 +249,7 @@ class GoogleSheetsDB:
         # Получаем связанные ID аккаунтов (и TG, и VK)
         linked_ids = await self.get_linked_user_ids(user_id, platform)
         
-        now = datetime.now()
+        now = datetime.now(TIMEZONE)
         user_bookings = []
 
         for booking in await self.get_all_bookings():
@@ -316,7 +317,7 @@ class GoogleSheetsDB:
         # Генерируем случайный код
         import random
         code = f"TGVK{random.randint(1000, 9999)}"
-        expires = datetime.now() + timedelta(minutes=AUTH_CODE_EXPIRY_MINUTES)
+        expires = datetime.now(TIMEZONE) + timedelta(minutes=AUTH_CODE_EXPIRY_MINUTES)
         expires_str = expires.strftime("%d.%m.%Y %H:%M")
         
         # Проверяем, есть ли уже активный код для этого telegram_id
@@ -372,7 +373,7 @@ class GoogleSheetsDB:
                 expires_str = record.get("code_expires", "")
                 try:
                     expires = datetime.strptime(expires_str, "%d.%m.%Y %H:%M")
-                    if datetime.now() > expires:
+                    if datetime.now(TIMEZONE) > expires:
                         # Код истёк - удаляем запись
                         self._sync_delete_user_auth_by_code(auth_code)
                         return False

@@ -5,7 +5,9 @@
 
 import asyncio
 import sys
+from datetime import datetime, timezone
 from data.database import db, BookingConflictError, ValidationError
+from config import TIMEZONE
 
 async def test_connection():
     """Проверка подключения к Google Sheets."""
@@ -34,8 +36,7 @@ async def test_connection():
             print("ℹ️ Бронирований пока нет")
         
         # Проверяем доступные слоты на сегодня
-        from datetime import datetime
-        today = datetime.now().strftime("%d.%m.%Y")
+        today = datetime.now(TIMEZONE).strftime("%d.%m.%Y")
         slots = await db.get_available_slots(today, "loft_living")
         print(f"\n🕐 Свободные слоты на сегодня (Лофт-Гостиная): {len(slots)}")
         if slots[:3]:

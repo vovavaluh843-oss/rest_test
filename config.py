@@ -6,6 +6,8 @@
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+from datetime import timezone, timedelta
+from zoneinfo import ZoneInfo
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -30,6 +32,14 @@ BOOKING_STEP_MINUTES = 30  # Шаг бронирования в минутах
 MAX_BOOKING_HOURS = 3  # Максимальная длительность бронирования в часах
 WORK_DAY_START = 9  # 9:00 - начало рабочего дня
 WORK_DAY_END = 18  # 18:00 - окончание рабочего дня
+
+# Часовой пояс для всей системы (измените при необходимости)
+TIMEZONE_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
+try:
+    TIMEZONE = ZoneInfo(TIMEZONE_NAME)
+except Exception:
+    # Fallback на UTC+3 если zoneinfo не доступен
+    TIMEZONE = timezone(timedelta(hours=3))
 
 # Пути к файлам (определяем ДО использования в ROOMS)
 BASE_DIR = Path(__file__).parent

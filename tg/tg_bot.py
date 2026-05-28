@@ -19,7 +19,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import TELEGRAM_BOT_TOKEN, ROOMS
+from config import TELEGRAM_BOT_TOKEN, ROOMS, TIMEZONE
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def get_main_menu_inline_keyboard():
 
 def get_view_date_keyboard():
     """Клавиатура для выбора даты просмотра броней."""
-    today = datetime.now()
+    today = datetime.now(TIMEZONE)
     buttons = []
     for i in range(7):
         date_obj = today + timedelta(days=i)
@@ -103,7 +103,7 @@ def get_rooms_keyboard():
 
 
 def get_date_keyboard():
-    today = datetime.now()
+    today = datetime.now(TIMEZONE)
     buttons = []
     for i in range(7):
         date_obj = today + timedelta(days=i)
@@ -216,7 +216,7 @@ async def reply_book_room(message: Message, state: FSMContext):
 
 @router.message(F.text == "📋 Брони на сегодня")
 async def reply_today_bookings(message: Message):
-    today_str = datetime.now().strftime("%d.%m.%Y")
+    today_str = datetime.now(TIMEZONE).strftime("%d.%m.%Y")
     bookings = await db.get_bookings_by_date(today_str)
 
     if not bookings:
@@ -320,7 +320,7 @@ async def process_book_room(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "today_bookings")
 async def process_today_bookings(callback: CallbackQuery):
     await callback.answer()
-    today_str = datetime.now().strftime("%d.%m.%Y")
+    today_str = datetime.now(TIMEZONE).strftime("%d.%m.%Y")
     bookings = await db.get_bookings_by_date(today_str)
 
     if not bookings:
