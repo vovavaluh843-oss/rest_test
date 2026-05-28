@@ -495,14 +495,31 @@ class GoogleSheetsDB:
         self._bookings_sheet.append_row(row_data)
 
     async def cancel_booking(self, booking_id, user_id, platform):
-        """Отменяет бронирование пользователя по ID брони."""
+        """Отменяет бронирование пользователя по ID брони (с проверкой связанных аккаунтов)."""
         await self.connect()
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._sync_cancel_booking, booking_id, user_id, platform)
 
     def _sync_cancel_booking(self, booking_id, user_id, platform):
-        """Удаляет строку бронирования из таблицы."""
+        """Удаляет строку бронирования из таблицы (с проверкой связанных аккаунтов)."""
+        # 1. Получаем все связанные ID для пользователя
+        allowed_ids = {str(user_id)}
+        
+        try:
+            records = self._sync_get_all_users_auth()
+            for record in records:
+                tg_id = str(record.get("telegram_id", ""))
+                vk_id = str(record.get("vk_id", ""))
+                
+                if tg_id == str(user_id) and vk_id:
+                    allowed_ids.add(vk_id)
+                if vk_id == str(user_id) and tg_id:
+                    allowed_ids.add(tg_id)
+        except Exception as e:
+            logger.error(f"Ошибка при получении связанных ID для отмены брони: {e}")
+        
+        # 2. Ищем и удаляем бронь
         all_values = self._bookings_sheet.get_all_values()
         for idx, row in enumerate(all_values[1:], start=2):
             if len(row) < 4:
@@ -511,8 +528,8 @@ class GoogleSheetsDB:
                 row_id = int(row[0])
                 row_user_id = str(row[3])
                 
-                # Проверяем ID брони и ID пользователя (платформа не важна для связанных аккаунтов)
-                if row_id == booking_id and row_user_id == str(user_id):
+                # Проверяем: ID брони совпадает И ID пользователя в allowed_ids
+                if row_id == booking_id and row_user_id in allowed_ids:
                     self._bookings_sheet.delete_rows(idx)
                     logger.info(f"Бронирование #{booking_id} отменено пользователем {user_id}")
                     return True
