@@ -875,13 +875,27 @@ async def process_cancel_specific_booking(callback: CallbackQuery, state: FSMCon
         return
 
     user_id = str(callback.from_user.id)
-    success = await db.cancel_booking(booking_id, user_id, "TG")
+    success, already_cancelled = await db.cancel_booking(booking_id, user_id, "TG")
 
     data = await state.get_data()
     photo_msg_id = data.get("photo_message_id")
     photo_chat_id = data.get("photo_chat_id")
 
-    if success:
+    if already_cancelled:
+        caption = f"ℹ️ Бронирование <b>#{booking_id}</b> уже было отменено ранее.\n\nВыберите действие:"
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=get_main_menu_inline_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=get_main_menu_inline_keyboard()
+            )
+    elif success:
         caption = f"✅ Бронирование <b>#{booking_id}</b> успешно отменено.\n\nВыберите действие:"
         if photo_msg_id and photo_chat_id:
             await bot.edit_message_caption(

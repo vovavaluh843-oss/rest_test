@@ -653,8 +653,13 @@ async def process_cancel_booking_by_id(message: Message):
     user_id = str(message.from_id)
 
     try:
-        success = await db.cancel_booking(booking_id, user_id, "VK")
-        if success:
+        success, already_cancelled = await db.cancel_booking(booking_id, user_id, "VK")
+        if already_cancelled:
+            await message.answer(
+                f"ℹ️ Бронирование #{booking_id} уже было отменено ранее.",
+                keyboard=get_main_menu_keyboard()
+            )
+        elif success:
             await message.answer(
                 f"✅ Бронирование #{booking_id} успешно отменено!",
                 keyboard=get_main_menu_keyboard()

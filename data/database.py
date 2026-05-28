@@ -130,11 +130,11 @@ class GoogleSheetsDB:
         return await loop.run_in_executor(None, self._sync_create_sheet)
 
     def _sync_create_sheet(self):
-        sheet = self._spreadsheet.add_worksheet(title=BOOKINGS_SHEET_NAME, rows=1000, cols=9)
+        sheet = self._spreadsheet.add_worksheet(title=BOOKINGS_SHEET_NAME, rows=1000, cols=10)
         headers = ["ID брони", "Имя", "Платформа", "ID пользователя",
-                   "Переговорка", "Дата", "Время Начала", "Время Конца", "Цель"]
+                   "Переговорка", "Дата", "Время Начала", "Время Конца", "Цель", "Статус"]
         sheet.append_row(headers)
-        sheet.format('A1:I1', {
+        sheet.format('A1:J1', {
             'textFormat': {'bold': True},
             'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
         })
@@ -223,25 +223,28 @@ class GoogleSheetsDB:
         return records
 
     async def get_bookings_by_date_and_room(self, date_str, room_id):
-        """Получает бронирования для конкретной комнаты и даты."""
-        await self.connect()
-        all_bookings = await self.get_all_bookings()
-        filtered = [
-            booking for booking in all_bookings
-            if booking.get("Дата") == date_str and booking.get("Переговорка") == room_id
-        ]
-        return filtered
-
-    async def get_bookings_by_date(self, date_str):
-        """Получает все бронирования на конкретную дату."""
+        """Получает активные бронирования для конкретной комнаты и даты."""
         await self.connect()
         all_bookings = await self.get_all_bookings()
         filtered = [
             booking for booking in all_bookings
             if booking.get("Дата") == date_str
+            and booking.get("Переговорка") == room_id
+            and booking.get("Статус", "Активно") == "Активно"
         ]
         return filtered
 
+    async def get_bookings_by_date(self, date_str):
+        """Получает активные бронирования на конкретную дату."""
+        await self.connect()
+        all_bookings = await self.get_all_bookings()
+        filtered = [
+            booking for booking in all_bookings
+            if booking.get("Дата") == date_str
+            and booking.get("Статус", "Активно") == "Активно"
+        ]
+        return filtered
+        
     async def get_user_bookings(self, user_id, platform):
         """Получает активные бронирования пользователя (с проверкой связанных аккаунтов)."""
         await self.connect()
@@ -253,6 +256,10 @@ class GoogleSheetsDB:
         user_bookings = []
 
         for booking in await self.get_all_bookings():
+            # Проверяем статус бронирования
+            if booking.get("Статус", "Активно") != "Активно":
+                continue
+
             # Проверяем, принадлежит ли бронь любому из связанных ID
             booking_user_id = str(booking.get("ID пользователя", ""))
             
@@ -267,7 +274,7 @@ class GoogleSheetsDB:
                 except (ValueError, TypeError):
                     continue
         return user_bookings
-
+        
     async def get_linked_user_ids(self, user_id, platform):
         """Получает список связанных ID для пользователя (для кросс-платформенного доступа)."""
         await self.connect()
@@ -457,7 +464,7 @@ class GoogleSheetsDB:
             # Запись в Google Sheets
             await self._append_booking_row(
                 booking_id, safe_name, safe_platform, safe_user_id, safe_room_id,
-                date_str, start_time_str, end_time_str, safe_purpose)
+                date_str, start_time_str, end_time_str, safe_purpose, "Активно")
 
             logger.info(f"Создано бронирование #{booking_id}: {safe_room_id} "
                         f"на {date_str} {start_time_str}-{end_time_str}")
@@ -484,26 +491,39 @@ class GoogleSheetsDB:
         return max_id + 1
 
     async def _append_booking_row(self, booking_id, user_name, platform, user_id,
-                                  room_id, date_str, start_time_str, end_time_str, purpose):
+                                  room_id, date_str, start_time_str, end_time_str, purpose, status="Активно"):
         """Добавляет строку бронирования в таблицу."""
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None, self._sync_append_row,
             [booking_id, user_name, platform, user_id, room_id,
-             date_str, start_time_str, end_time_str, purpose])
+             date_str, start_time_str, end_time_str, purpose, status])
 
     def _sync_append_row(self, row_data):
         self._bookings_sheet.append_row(row_data)
 
     async def cancel_booking(self, booking_id, user_id, platform):
-        """Отменяет бронирование пользователя по ID брони (с проверкой связанных аккаунтов)."""
+        """
+        Отменяет бронирование пользователя по ID брони (с проверкой связанных аккаунтов).
+        Вместо удаления строки устанавливает статус "Отменено" (soft delete).
+        
+        Returns:
+            tuple: (success: bool, already_cancelled: bool)
+                success - удалось ли отменить бронь
+                already_cancelled - была ли бронь уже отменена ранее
+        """
         await self.connect()
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._sync_cancel_booking, booking_id, user_id, platform)
+            None, self._sync_cancel_booking, booking_id, user_id)
 
-    def _sync_cancel_booking(self, booking_id, user_id, platform):
-        """Удаляет строку бронирования из таблицы (с проверкой связанных аккаунтов)."""
+    def _sync_cancel_booking(self, booking_id, user_id):
+        """
+        Устанавливает статус "Отменено" для бронирования (soft delete).
+        
+        Returns:
+            tuple: (success: bool, already_cancelled: bool)
+        """
         # 1. Получаем все связанные ID для пользователя
         allowed_ids = {str(user_id)}
         
@@ -520,7 +540,7 @@ class GoogleSheetsDB:
         except Exception as e:
             logger.error(f"Ошибка при получении связанных ID для отмены брони: {e}")
         
-        # 2. Ищем и удаляем бронь
+        # 2. Ищем бронь и проверяем статус
         all_values = self._bookings_sheet.get_all_values()
         for idx, row in enumerate(all_values[1:], start=2):
             if len(row) < 4:
@@ -528,15 +548,22 @@ class GoogleSheetsDB:
             try:
                 row_id = int(row[0])
                 row_user_id = str(row[3])
+                row_status = row[9] if len(row) > 9 else "Активно"
                 
                 # Проверяем: ID брони совпадает И ID пользователя в allowed_ids
                 if row_id == booking_id and row_user_id in allowed_ids:
-                    self._bookings_sheet.delete_rows(idx)
-                    logger.info(f"Бронирование #{booking_id} отменено пользователем {user_id}")
-                    return True
+                    # Проверяем, не отменена ли уже
+                    if row_status == "Отменено":
+                        logger.info(f"Бронирование #{booking_id} уже было отменено ранее")
+                        return False, True
+                    
+                    # Soft delete: обновляем статус вместо удаления
+                    self._bookings_sheet.update_cell(idx, 10, "Отменено")
+                    logger.info(f"Бронирование #{booking_id} отменено (soft delete) пользователем {user_id}")
+                    return True, False
             except (ValueError, IndexError):
                 continue
-        return False
+        return False, False
 
     async def get_available_slots(self, date_str, room_id):
         """Получает список свободных слотов для бронирования."""
