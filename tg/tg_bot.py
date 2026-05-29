@@ -831,7 +831,7 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
         # Автоматический возврат в главное меню с Reply-кнопками
         await callback.message.answer(
             "👋 Вы вернулись в главное меню. Выберите действие:",
-            reply_markup=get_main_reply_keyboard(message.from_user.id)
+            reply_markup=get_main_reply_keyboard(callback.from_user.id)
         )
 
     except BookingConflictError as e:
