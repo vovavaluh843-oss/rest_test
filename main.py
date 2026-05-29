@@ -1,17 +1,36 @@
 import asyncio
 import logging
+import logging.handlers
+import os
 import signal
 import sys
 from tg.tg_bot import dp, bot as tg_bot
 from vk.vk_bot import bot as vk_bot
 
-# Настройка логирования
+# === НАСТРОЙКА ЛОГИРОВАНИЯ С РОТАЦИЕЙ ===
+LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+formatter = logging.Formatter(LOG_FORMAT)
+
+# Handler: консоль
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+
+# Handler: файл с ротацией (5MB, 3 backup)
+file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(LOGS_DIR, "bot.log"),
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=3,
+    encoding="utf-8"
+)
+file_handler.setFormatter(formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format=LOG_FORMAT,
+    handlers=[console_handler, file_handler]
 )
 logger = logging.getLogger(__name__)
 

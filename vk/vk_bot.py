@@ -5,6 +5,7 @@ VK-бот для системы бронирования переговорны�
 
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 
 from vkbottle.bot import Bot, Message
@@ -14,6 +15,42 @@ from config import VK_BOT_TOKEN, ROOMS, TIMEZONE
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
+
+# === RATE LIMITING ===
+THROTTLE_INTERVAL = 1.0  # Минимальный интервал между запросами (сек)
+_last_request_time: dict[int, float] = {}
+
+
+def check_rate_limit(user_id: int) -> bool:
+    """Проверяет, не превышен ли rate limit для пользователя."""
+    now = time.time()
+    last_time = _last_request_time.get(user_id, 0)
+    if now - last_time < THROTTLE_INTERVAL:
+        logger.warning(f"Rate limit triggered for VK user {user_id}")
+        return False
+    _last_request_time[user_id] = now
+    return True
+
+
+def rate_limit():
+    """Декоратор для проверки rate limiting перед обработкой сообщения."""
+    def decorator(handler):
+        async def wrapper(message: Message, **kwargs):
+            if not check_rate_limit(message.from_id):
+                await message.answer("⚠️ Пожалуйста, не спамьте. Подождите немного.")
+                return
+            return await handler(message, **kwargs)
+        return wrapper
+    return decorator
+    """Проверяет, не превышен ли rate limit для пользователя."""
+    now = time.time()
+    last_time = _last_request_time.get(user_id, 0)
+    if now - last_time < THROTTLE_INTERVAL:
+        logger.warning(f"Rate limit triggered for VK user {user_id}")
+        return False
+    _last_request_time[user_id] = now
+    return True
+
 
 # === ИНИЦИАЛИЗАЦИЯ БОТА ===
 bot = Bot(token=VK_BOT_TOKEN)
@@ -208,6 +245,7 @@ def format_bookings_list(bookings, date_str):
 # === ОБРАБОТЧИКИ ===
 
 @bot.on.message(text=["/start", "Начать", "Меню", "меню", "◀️ Главное меню"])
+@rate_limit()
 async def cmd_start(message: Message):
     set_user_data(message.peer_id, {})
     try:
@@ -226,6 +264,7 @@ async def cmd_start(message: Message):
 
 
 @bot.on.message(text="Помощь")
+@rate_limit()
 async def cmd_help(message: Message):
     await message.answer(
         "📖 Помощь по системе бронирования\n\n"
@@ -242,6 +281,7 @@ async def cmd_help(message: Message):
 
 
 @bot.on.message(text="📅 Забронировать комнату")
+@rate_limit()
 async def process_book_room(message: Message):
     await bot.state_dispenser.set(message.peer_id, BookingState.SELECTING_ROOM)
     await message.answer(
@@ -251,6 +291,7 @@ async def process_book_room(message: Message):
 
 
 @bot.on.message(text="📋 Просмотр броней")
+@rate_limit()
 async def process_view_bookings(message: Message):
     await bot.state_dispenser.set(message.peer_id, BookingState.VIEWING_BOOKINGS)
     await message.answer(
@@ -260,15 +301,17 @@ async def process_view_bookings(message: Message):
 
 
 @bot.on.message(text="📅 Брони на сегодня")
+@rate_limit()
 async def process_today_bookings(message: Message):
     today_str = datetime.now(TIMEZONE).strftime("%d.%m.%Y")
     bookings = await db.get_bookings_by_date(today_str)
     
     text = format_bookings_list(bookings, today_str)
     await message.answer(text, keyboard=get_view_bookings_keyboard())
-
+    
 
 @bot.on.message(text="🔍 Выбрать конкретную дату")
+@rate_limit()
 async def process_select_date_for_view(message: Message):
     await bot.state_dispenser.set(message.peer_id, BookingState.VIEWING_DATE_SELECT)
     await message.answer(
@@ -278,6 +321,7 @@ async def process_select_date_for_view(message: Message):
 
 
 @bot.on.message(state=BookingState.VIEWING_DATE_SELECT)
+@rate_limit()
 async def process_view_date_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
@@ -308,6 +352,7 @@ async def process_view_date_selection(message: Message):
 
 
 @bot.on.message(text="📋 Мои бронирования")
+@rate_limit()
 async def process_my_bookings(message: Message):
     user_id = str(message.peer_id)
     bookings = await db.get_user_bookings(user_id, "VK")
@@ -350,6 +395,7 @@ async def process_my_bookings(message: Message):
 
 
 @bot.on.message(state=BookingState.SELECTING_ROOM)
+@rate_limit()
 async def process_room_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
@@ -402,6 +448,7 @@ async def process_room_selection(message: Message):
 
 
 @bot.on.message(state=BookingState.SELECTING_DATE)
+@rate_limit()
 async def process_date_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
@@ -445,6 +492,7 @@ async def process_date_selection(message: Message):
 
 
 @bot.on.message(state=BookingState.SELECTING_START_TIME)
+@rate_limit()
 async def process_time_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
@@ -479,6 +527,7 @@ async def process_time_selection(message: Message):
 
 
 @bot.on.message(state=BookingState.SELECTING_DURATION)
+@rate_limit()
 async def process_duration_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
@@ -536,6 +585,7 @@ async def process_duration_selection(message: Message):
 
 
 @bot.on.message(state=BookingState.ENTERING_PURPOSE)
+@rate_limit()
 async def process_purpose(message: Message):
     peer_id = message.peer_id
     purpose = message.text.strip()
@@ -565,6 +615,7 @@ async def process_purpose(message: Message):
 
 
 @bot.on.message(state=BookingState.CONFIRMING)
+@rate_limit()
 async def process_confirm(message: Message):
     peer_id = message.peer_id
     text = message.text
@@ -641,6 +692,7 @@ async def process_confirm(message: Message):
 
 
 @bot.on.message(func=lambda msg: msg.text and "Отменить бронь #" in msg.text)
+@rate_limit()
 async def process_cancel_booking_by_id(message: Message):
     """Обработчик отмены бронирования по ID из кнопки."""
     # Извлекаем ID брони из текста сообщения
@@ -679,6 +731,7 @@ async def process_cancel_booking_by_id(message: Message):
 
 
 @bot.on.message(text="Отменить бронь")
+@rate_limit()
 async def process_cancel_booking_help(message: Message):
     await message.answer(
         "Чтобы отменить бронирование, выберите его в разделе '📋 Мои бронирования'",
@@ -687,6 +740,7 @@ async def process_cancel_booking_help(message: Message):
 
 
 @bot.on.message(func=lambda msg: msg.text and (msg.text.startswith("TGVK") and len(msg.text) == 8))
+@rate_limit()
 async def process_auth_code(message: Message):
     """Обработчик кодов авторизации для связки аккаунтов."""
     auth_code = message.text.strip()

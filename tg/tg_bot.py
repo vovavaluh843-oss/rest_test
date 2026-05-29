@@ -4,6 +4,7 @@ Telegram-бот для системы бронирования перегово�
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -24,11 +25,45 @@ from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
 
+# === RATE LIMITING ===
+THROTTLE_INTERVAL = 1.0  # Минимальный интервал между запросами (сек)
+_last_request_time: dict[int, float] = {}
+
+
+class ThrottlingMiddleware:
+    """Middleware для защиты от спама (rate limiting)."""
+
+    async def __call__(self, handler, event, data):
+        user_id = None
+        if isinstance(event, Message):
+            user_id = event.from_user.id
+        elif isinstance(event, CallbackQuery):
+            user_id = event.from_user.id
+
+        if user_id:
+            now = time.time()
+            last_time = _last_request_time.get(user_id, 0)
+            if now - last_time < THROTTLE_INTERVAL:
+                logger.warning(f"Rate limit triggered for user {user_id}")
+                if isinstance(event, Message):
+                    await event.answer("⚠️ Пожалуйста, не спамьте. Подождите немного.")
+                elif isinstance(event, CallbackQuery):
+                    await event.answer("⚠️ Слишком часто! Подождите секунду.", show_alert=True)
+                return None
+            _last_request_time[user_id] = now
+
+        return await handler(event, data)
+
+
 # Инициализация бота с HTML-разметкой
 bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
+
+# Подключаем middleware для rate limiting
+dp.message.middleware(ThrottlingMiddleware())
+dp.callback_query.middleware(ThrottlingMiddleware())
 
 
 class BookingStates(StatesGroup):

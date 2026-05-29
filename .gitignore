@@ -2,6 +2,11 @@
 .env
 service_account.json
 
+# Логи
+logs/
+*.log
+booking_system.log
+
 # Python
 __pycache__/
 *.py[cod]
@@ -11,10 +16,6 @@ __pycache__/
 venv/
 env/
 ENV/
-
-# Логи
-*.log
-booking_system.log
 
 # IDE
 .idea/
