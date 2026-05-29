@@ -6,12 +6,13 @@ VK-бот для системы бронирования переговорны�
 import logging
 import re
 import time
+import asyncio
 from datetime import datetime, timedelta
 
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
 
-from config import VK_BOT_TOKEN, ROOMS, TIMEZONE
+from config import VK_BOT_TOKEN, ROOMS, TIMEZONE, VK_ADMIN_IDS
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 # === RATE LIMITING ===
 THROTTLE_INTERVAL = 1.0  # Минимальный интервал между запросами (сек)
 _last_request_time: dict[int, float] = {}
+
+
+def is_admin(user_id: int) -> bool:
+    """Проверяет, является ли пользователь администратором."""
+    return user_id in VK_ADMIN_IDS
 
 
 def check_rate_limit(user_id: int) -> bool:
@@ -64,19 +70,40 @@ class BookingState(BaseStateGroup):
     SELECTING_DURATION = 4
     ENTERING_PURPOSE = 5
     CONFIRMING = 6
-    VIEWING_BOOKINGS = 7  # Новое состояние для просмотра броней
-    VIEWING_DATE_SELECT = 8  # Новое состояние для выбора даты просмотра
+    VIEWING_BOOKINGS = 7
+    VIEWING_DATE_SELECT = 8
+    ADMIN_FORCE_CANCEL = 9   # Ожидание ID брони для принудительной отмены
+    ADMIN_BROADCAST = 10      # Ожидание текста для рассылки
 
 
 # === КЛАВИАТУРЫ ===
 
-def get_main_menu_keyboard():
+def get_main_menu_keyboard(user_id: int = None):
     keyboard = Keyboard(one_time=False)
     keyboard.add(Text("📅 Забронировать комнату"), color=KeyboardButtonColor.PRIMARY)
     keyboard.row()
     keyboard.add(Text("📋 Просмотр броней"), color=KeyboardButtonColor.SECONDARY)
     keyboard.row()
     keyboard.add(Text("📋 Мои бронирования"), color=KeyboardButtonColor.SECONDARY)
+    
+    # Добавляем админ-кнопку только для администраторов
+    if user_id and is_admin(user_id):
+        keyboard.row()
+        keyboard.add(Text("👑 Админ-панель"), color=KeyboardButtonColor.NEGATIVE)
+    
+    return keyboard
+
+
+def get_admin_menu_keyboard():
+    """Клавиатура админ-панели."""
+    keyboard = Keyboard(one_time=False)
+    keyboard.add(Text("📊 Статистика за сегодня"), color=KeyboardButtonColor.PRIMARY)
+    keyboard.row()
+    keyboard.add(Text("🚫 Принудительная отмена"), color=KeyboardButtonColor.NEGATIVE)
+    keyboard.row()
+    keyboard.add(Text("📢 Объявление (Рассылка)"), color=KeyboardButtonColor.POSITIVE)
+    keyboard.row()
+    keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
     return keyboard
 
 
@@ -259,7 +286,7 @@ async def cmd_start(message: Message):
         "• 📋 Просмотреть все бронирования\n"
         "• 📋 Управлять своими бронированиями\n\n"
         "Выберите действие:",
-        keyboard=get_main_menu_keyboard()
+        keyboard=get_main_menu_keyboard(message.from_id)
     )
 
 
@@ -408,7 +435,7 @@ async def process_room_selection(message: Message):
             pass
         await message.answer(
             "Главное меню. Выберите действие:",
-            keyboard=get_main_menu_keyboard()
+            keyboard=get_main_menu_keyboard(message.from_id)
         )
         return
 
@@ -629,7 +656,7 @@ async def process_confirm(message: Message):
         await message.answer(
             "❌ Бронирование отменено.\n\n"
             "Выберите действие:",
-            keyboard=get_main_menu_keyboard()
+            keyboard=get_main_menu_keyboard(message.from_id)
         )
         return
 
@@ -666,11 +693,11 @@ async def process_confirm(message: Message):
             f"🕐 Время: {data['start_time']} — {data['end_time']}\n"
             f"🆔 Номер брони: #{booking_id}\n\n"
             f"Ждем вас на встрече!",
-            keyboard=get_main_menu_keyboard()
+            keyboard=get_main_menu_keyboard(message.from_id)
         )
 
     except BookingConflictError as e:
-        await message.answer(str(e), keyboard=get_main_menu_keyboard())
+        await message.answer(str(e), keyboard=get_main_menu_keyboard(message.from_id))
         try:
             await bot.state_dispenser.delete(peer_id)
         except KeyError:
@@ -681,10 +708,10 @@ async def process_confirm(message: Message):
             await bot.state_dispenser.delete(peer_id)
         except KeyError:
             pass
-        await message.answer(f"⚠️ Ошибка: {str(e)}", keyboard=get_main_menu_keyboard())
+        await message.answer(f"⚠️ Ошибка: {str(e)}", keyboard=get_main_menu_keyboard(message.from_id))
     except Exception as e:
         logger.error(f"Ошибка создания бронирования: {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже.", keyboard=get_main_menu_keyboard())
+        await message.answer("Произошла ошибка. Попробуйте позже.", keyboard=get_main_menu_keyboard(message.from_id))
         try:
             await bot.state_dispenser.delete(peer_id)
         except KeyError:
@@ -709,24 +736,24 @@ async def process_cancel_booking_by_id(message: Message):
         if already_cancelled:
             await message.answer(
                 f"ℹ️ Бронирование #{booking_id} уже было отменено ранее.",
-                keyboard=get_main_menu_keyboard()
+                keyboard=get_main_menu_keyboard(message.from_id)
             )
         elif success:
             await message.answer(
                 f"✅ Бронирование #{booking_id} успешно отменено!",
-                keyboard=get_main_menu_keyboard()
+                keyboard=get_main_menu_keyboard(message.from_id)
             )
         else:
             await message.answer(
                 f"❌ Не удалось найти или отменить бронирование #{booking_id}.\n"
                 f"Возможно, оно уже прошло или было отменено.",
-                keyboard=get_main_menu_keyboard()
+                keyboard=get_main_menu_keyboard(message.from_id)
             )
     except Exception as e:
         logger.error(f"Ошибка при отмене бронирования: {e}")
         await message.answer(
             f"⚠️ Произошла ошибка при отмене: {e}",
-            keyboard=get_main_menu_keyboard()
+            keyboard=get_main_menu_keyboard(message.from_id)
         )
 
 
@@ -735,7 +762,7 @@ async def process_cancel_booking_by_id(message: Message):
 async def process_cancel_booking_help(message: Message):
     await message.answer(
         "Чтобы отменить бронирование, выберите его в разделе '📋 Мои бронирования'",
-        keyboard=get_main_menu_keyboard()
+        keyboard=get_main_menu_keyboard(message.from_id)
     )
 
 
@@ -754,7 +781,7 @@ async def process_auth_code(message: Message):
                 f"🎉 Аккаунты успешно связаны!\n\n"
                 f"Теперь вам доступны все ваши бронирования из Telegram.\n"
                 f"Вы можете использовать любого бота для управления всеми бронями.",
-                keyboard=get_main_menu_keyboard()
+                keyboard=get_main_menu_keyboard(message.from_id)
             )
         else:
             await message.answer(
@@ -763,11 +790,209 @@ async def process_auth_code(message: Message):
                 f"• Код введён правильно (например: TGVK1234)\n"
                 f"• Код не старше 10 минут\n\n"
                 f"Попробуйте снова или получите новый код в Telegram-боте.",
-                keyboard=get_main_menu_keyboard()
+                keyboard=get_main_menu_keyboard(message.from_id)
             )
     except Exception as e:
         logger.error(f"Ошибка при связке аккаунтов: {e}")
         await message.answer(
             f"⚠️ Произошла ошибка. Попробуйте позже.",
-            keyboard=get_main_menu_keyboard()
+            keyboard=get_main_menu_keyboard(message.from_id)
         )
+
+
+# === АДМИН-ПАНЕЛЬ ===
+
+@bot.on.message(text="👑 Админ-панель")
+async def admin_panel(message: Message):
+    """Главное меню администратора."""
+    if not is_admin(message.from_id):
+        await message.answer("⛔ У вас нет доступа к админ-панели.")
+        return
+    
+    await message.answer(
+        "👑 Панель администратора\n\n"
+        "Выберите действие:",
+        keyboard=get_admin_menu_keyboard()
+    )
+
+
+@bot.on.message(text="📊 Статистика за сегодня")
+async def admin_stats(message: Message):
+    """Статистика бронирований за сегодня."""
+    if not is_admin(message.from_id):
+        await message.answer("⛔ У вас нет доступа.")
+        return
+    
+    try:
+        stats = await db.get_today_stats()
+        
+        text = (
+            f"📊 Статистика за {stats['date']}\n\n"
+            f"📋 Всего броней: {stats['total']}\n"
+            f"✅ Активных: {stats['active']}\n"
+            f"❌ Отменено: {stats['cancelled']}\n\n"
+        )
+        
+        if stats['top_rooms']:
+            text += "🏢 Топ комнат:\n"
+            for room_id, count in stats['top_rooms']:
+                room_name = ROOMS.get(room_id, {}).get('name', room_id)
+                text += f"  • {room_name}: {count} броней\n"
+        else:
+            text += "🏢 Сегодня броней пока нет."
+        
+        await message.answer(text, keyboard=get_admin_menu_keyboard())
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики: {e}")
+        await message.answer(
+            "⚠️ Ошибка при получении статистики.",
+            keyboard=get_admin_menu_keyboard()
+        )
+
+
+@bot.on.message(text="🚫 Принудительная отмена")
+async def admin_force_cancel(message: Message):
+    """Начало принудительной отмены брони."""
+    if not is_admin(message.from_id):
+        await message.answer("⛔ У вас нет доступа.")
+        return
+    
+    await bot.state_dispenser.set(message.peer_id, BookingState.ADMIN_FORCE_CANCEL)
+    await message.answer(
+        "🚫 Принудительная отмена брони\n\n"
+        "Введите ID брони, которую нужно отменить:\n"
+        "(только число, например: 42)",
+        keyboard=get_admin_menu_keyboard()
+    )
+
+
+@bot.on.message(state=BookingState.ADMIN_FORCE_CANCEL)
+async def process_admin_force_cancel(message: Message):
+    """Обработка ID брони для принудительной отмены."""
+    if not is_admin(message.from_id):
+        await message.answer("⛔ У вас нет доступа.")
+        await bot.state_dispenser.delete(message.peer_id)
+        return
+    
+    text = message.text.strip()
+    
+    # Проверяем, что введено число
+    if not text.isdigit():
+        await message.answer(
+            "⚠️ Пожалуйста, введите только число (ID брони).",
+            keyboard=get_admin_menu_keyboard()
+        )
+        return
+    
+    booking_id = int(text)
+    
+    try:
+        success = await db.admin_cancel_booking(booking_id)
+        
+        if success:
+            await message.answer(
+                f"✅ Бронь #{booking_id} успешно отменена администратором.",
+                keyboard=get_admin_menu_keyboard()
+            )
+        else:
+            await message.answer(
+                f"ℹ️ Бронь #{booking_id} не найдена или уже отменена.",
+                keyboard=get_admin_menu_keyboard()
+            )
+    except Exception as e:
+        logger.error(f"Ошибка принудительной отмены: {e}")
+        await message.answer(
+            "⚠️ Произошла ошибка при отмене брони.",
+            keyboard=get_admin_menu_keyboard()
+        )
+    
+    await bot.state_dispenser.delete(message.peer_id)
+
+
+@bot.on.message(text="📢 Объявление (Рассылка)")
+async def admin_broadcast(message: Message):
+    """Начало рассылки объявления."""
+    if not is_admin(message.from_id):
+        await message.answer("⛔ У вас нет доступа.")
+        return
+    
+    await bot.state_dispenser.set(message.peer_id, BookingState.ADMIN_BROADCAST)
+    await message.answer(
+        "📢 Рассылка объявления\n\n"
+        "Введите текст, который будет разослан ВСЕМ пользователям:\n"
+        "(максимум 4096 символов)",
+        keyboard=get_admin_menu_keyboard()
+    )
+
+
+@bot.on.message(state=BookingState.ADMIN_BROADCAST)
+async def process_admin_broadcast(message: Message):
+    """Отправка рассылки всем пользователям."""
+    if not is_admin(message.from_id):
+        await message.answer("⛔ У вас нет доступа.")
+        await bot.state_dispenser.delete(message.peer_id)
+        return
+    
+    broadcast_text = message.text.strip()
+    
+    if len(broadcast_text) < 5:
+        await message.answer(
+            "⚠️ Текст слишком короткий. Минимум 5 символов.",
+            keyboard=get_admin_menu_keyboard()
+        )
+        return
+    
+    if len(broadcast_text) > 4096:
+        await message.answer(
+            "⚠️ Текст слишком длинный. Максимум 4096 символов.",
+            keyboard=get_admin_menu_keyboard()
+        )
+        return
+    
+    try:
+        users = await db.get_all_unique_users()
+        
+        if not users:
+            await message.answer(
+                "ℹ️ В базе пока нет зарегистрированных пользователей для рассылки.",
+                keyboard=get_admin_menu_keyboard()
+            )
+            await bot.state_dispenser.delete(message.peer_id)
+            return
+        
+        sent_count = 0
+        failed_count = 0
+        
+        for user in users:
+            vk_id = user.get("vk_id")
+            
+            # Отправляем в VK
+            if vk_id:
+                try:
+                    await bot.api.messages.send(
+                        user_id=int(vk_id),
+                        message=f"📢 Объявление\n\n{broadcast_text[:4000]}",
+                        random_id=0
+                    )
+                    sent_count += 1
+                    await asyncio.sleep(0.5)  # Задержка между сообщениями
+                except Exception as e:
+                    logger.error(f"Ошибка рассылки в VK {vk_id}: {e}")
+                    failed_count += 1
+        
+        await message.answer(
+            f"✅ Рассылка завершена\n\n"
+            f"📤 Отправлено: {sent_count}\n"
+            f"❌ Ошибок: {failed_count}\n"
+            f"👥 Всего пользователей: {len(users)}",
+            keyboard=get_admin_menu_keyboard()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка рассылки: {e}")
+        await message.answer(
+            "⚠️ Произошла ошибка при рассылке.",
+            keyboard=get_admin_menu_keyboard()
+        )
+    
+    await bot.state_dispenser.delete(message.peer_id)

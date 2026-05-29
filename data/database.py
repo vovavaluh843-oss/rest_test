@@ -672,6 +672,116 @@ class GoogleSheetsDB:
                 continue
         return False
 
+    # === АДМИН-МЕТОДЫ ===
+
+    async def get_today_stats(self) -> dict:
+        """
+        Получает статистику бронирований за сегодня.
+        
+        Returns:
+            dict: {
+                'total': int,           # Всего броней
+                'active': int,          # Активных
+                'cancelled': int,       # Отменённых
+                'top_rooms': list       # Топ комнат [(room_id, count), ...]
+            }
+        """
+        await self.connect()
+        today_str = datetime.now(TIMEZONE).strftime("%d.%m.%Y")
+        
+        all_bookings = await self.get_all_bookings()
+        today_bookings = [
+            b for b in all_bookings 
+            if b.get("Дата") == today_str
+        ]
+        
+        total = len(today_bookings)
+        active = sum(1 for b in today_bookings if b.get("Статус", "Активно") == "Активно")
+        cancelled = total - active
+        
+        # Топ комнат
+        room_counts = {}
+        for b in today_bookings:
+            room_id = b.get("Переговорка", "unknown")
+            room_counts[room_id] = room_counts.get(room_id, 0) + 1
+        
+        top_rooms = sorted(room_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        return {
+            "total": total,
+            "active": active,
+            "cancelled": cancelled,
+            "top_rooms": top_rooms,
+            "date": today_str
+        }
+
+    async def get_all_unique_users(self) -> list[dict]:
+        """
+        Получает список всех уникальных пользователей для рассылки.
+        Возвращает записи из users_auth.
+        
+        Returns:
+            list[dict]: Список словарей с telegram_id, vk_id, name
+        """
+        await self.connect()
+        try:
+            records = await self._get_all_users_auth()
+            # Фильтруем пустые записи
+            users = []
+            for r in records:
+                tg_id = r.get("telegram_id", "")
+                vk_id = r.get("vk_id", "")
+                name = r.get("name", "")
+                if tg_id or vk_id:
+                    users.append({
+                        "telegram_id": str(tg_id) if tg_id else None,
+                        "vk_id": str(vk_id) if vk_id else None,
+                        "name": name
+                    })
+            return users
+        except Exception as e:
+            logger.error(f"Ошибка получения списка пользователей: {e}")
+            return []
+
+    async def admin_cancel_booking(self, booking_id: int) -> bool:
+        """
+        Принудительная отмена бронирования администратором.
+        НЕ проверяет права пользователя (allowed_ids).
+        
+        Args:
+            booking_id: ID брони для отмены
+            
+        Returns:
+            bool: True если отменена, False если не найдена или уже отменена
+        """
+        await self.connect()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._sync_admin_cancel_booking, booking_id)
+
+    def _sync_admin_cancel_booking(self, booking_id: int) -> bool:
+        """Синхронная принудительная отмена брони админом."""
+        all_values = self._bookings_sheet.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < 10:
+                continue
+            try:
+                row_id = int(row[0])
+                row_status = row[9] if len(row) > 9 else "Активно"
+                
+                if row_id == booking_id:
+                    if row_status == "Отменено":
+                        logger.info(f"Админ: бронь #{booking_id} уже была отменена")
+                        return False
+                    
+                    self._bookings_sheet.update_cell(idx, 10, "Отменено")
+                    logger.info(f"Админ принудительно отменил бронь #{booking_id}")
+                    return True
+            except (ValueError, IndexError):
+                continue
+        logger.warning(f"Админ: бронь #{booking_id} не найдена")
+        return False
+
 
 # Глобальный экземпляр базы данных
 db = GoogleSheetsDB()

@@ -77,3 +77,8 @@ ROOMS = {
 # Настройки логирования
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# === АДМИНИСТРАТОРЫ ===
+# ID администраторов для Telegram и VK (добавьте свои ID)
+TG_ADMIN_IDS = [950069853]  # Замените на свои ID
+VK_ADMIN_IDS = [445181972]  # Замените на свои ID

@@ -4,6 +4,7 @@ Telegram-бот для системы бронирования перегово�
 """
 
 import logging
+import asyncio
 import time
 from datetime import datetime, timedelta
 
@@ -20,7 +21,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import TELEGRAM_BOT_TOKEN, ROOMS, TIMEZONE
+from config import TELEGRAM_BOT_TOKEN, ROOMS, TIMEZONE, TG_ADMIN_IDS
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -73,27 +74,43 @@ class BookingStates(StatesGroup):
     selecting_duration = State()
     entering_purpose = State()
     confirming = State()
-    viewing_bookings_date = State()  # Состояние для просмотра броней на дату
+    viewing_bookings_date = State()
+
+
+class AdminStates(StatesGroup):
+    force_cancel = State()      # Ожидание ID брони для принудительной отмены
+    broadcast = State()         # Ожидание текста для рассылки
+
+
+def is_admin(user_id: int) -> bool:
+    """Проверяет, является ли пользователь администратором."""
+    return user_id in TG_ADMIN_IDS
 
 
 # === КЛАВИАТУРЫ ===
 
-def get_main_reply_keyboard():
-    """Reply-клавиатура главного меню."""
+def get_main_reply_keyboard(user_id: int = None):
+    """Reply-клавиатура главного меню. Для админов добавляет кнопку админ-панели."""
+    keyboard = [
+        [KeyboardButton(text="📅 Забронировать комнату")],
+        [KeyboardButton(text="📋 Брони на сегодня")],
+        [KeyboardButton(text="📅 Брони на дату")],
+        [KeyboardButton(text="📋 Мои бронирования")],
+        [KeyboardButton(text="🔗 Привязать ВКонтакте")],
+    ]
+    
+    # Добавляем админ-кнопку только для администраторов
+    if user_id and is_admin(user_id):
+        keyboard.append([KeyboardButton(text="👑 Админ-панель")])
+    
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📅 Забронировать комнату")],
-            [KeyboardButton(text="📋 Брони на сегодня")],
-            [KeyboardButton(text="📅 Брони на дату")],
-            [KeyboardButton(text="📋 Мои бронирования")],
-            [KeyboardButton(text="🔗 Привязать ВКонтакте")],
-        ],
+        keyboard=keyboard,
         resize_keyboard=True,
         one_time_keyboard=False
     )
 
 
-def get_main_menu_inline_keyboard():
+def get_main_menu_inline_keyboard(user_id: int = None):
     buttons = [
         [InlineKeyboardButton(text="📅 Забронировать комнату", callback_data="book_room")],
         [InlineKeyboardButton(text="📋 Брони на сегодня", callback_data="today_bookings")],
@@ -101,7 +118,22 @@ def get_main_menu_inline_keyboard():
         [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="my_bookings")],
         [InlineKeyboardButton(text="🔗 Привязать ВКонтакте", callback_data="link_vk")],
     ]
+    
+    # Добавляем админ-кнопку только для администраторов
+    if user_id and is_admin(user_id):
+        buttons.append([InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_admin_menu_keyboard():
+    """Клавиатура админ-панели."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика за сегодня", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="🚫 Принудительная отмена", callback_data="admin_force_cancel")],
+        [InlineKeyboardButton(text="📢 Объявление (Рассылка)", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")],
+    ])
 
 
 def get_view_date_keyboard():
@@ -215,7 +247,7 @@ async def cmd_start(message: Message, state: FSMContext):
         "• 📋 Посмотреть брони на сегодня\n"
         "• 📋 Управлять своими бронированиями\n\n"
         "Выберите действие:",
-        reply_markup=get_main_reply_keyboard()
+        reply_markup=get_main_reply_keyboard(message.from_user.id)
     )
 
 
@@ -258,7 +290,7 @@ async def reply_today_bookings(message: Message):
         await message.answer(
             f"📅 <b>Бронирования на сегодня ({today_str}):</b>\n\n"
             f"На сегодня бронирований пока нет. Вы можете стать первым!",
-            reply_markup=get_main_reply_keyboard()
+            reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
         return
 
@@ -271,7 +303,7 @@ async def reply_today_bookings(message: Message):
             f"{room_name} ({username})\n"
         )
 
-    await message.answer(text, reply_markup=get_main_reply_keyboard())
+    await message.answer(text, reply_markup=get_main_reply_keyboard(message.from_user.id))
 
 
 @router.message(F.text == "📅 Брони на дату")
@@ -291,7 +323,7 @@ async def reply_my_bookings(message: Message):
     if not bookings:
         await message.answer(
             "📋 У вас пока нет активных бронирований.",
-            reply_markup=get_main_reply_keyboard()
+            reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
         return
 
@@ -429,13 +461,13 @@ async def reply_link_vk(message: Message, state: FSMContext):
             f"2. Отправьте ему этот код\n"
             f"3. Код действует 10 минут\n\n"
             f"После привязки ваши бронирования из Telegram будут доступны в ВК!",
-            reply_markup=get_main_reply_keyboard()
+            reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
     except Exception as e:
         logger.error(f"Ошибка генерации кода авторизации: {e}")
         await message.answer(
             "⚠️ Произошла ошибка при генерации кода. Попробуйте позже.",
-            reply_markup=get_main_reply_keyboard()
+            reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
 
 
@@ -799,7 +831,7 @@ async def process_confirm_booking(callback: CallbackQuery, state: FSMContext):
         # Автоматический возврат в главное меню с Reply-кнопками
         await callback.message.answer(
             "👋 Вы вернулись в главное меню. Выберите действие:",
-            reply_markup=get_main_reply_keyboard()
+            reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
 
     except BookingConflictError as e:
@@ -949,6 +981,238 @@ async def process_cancel_specific_booking(callback: CallbackQuery, state: FSMCon
             "Не удалось отменить бронирование. Возможно, оно уже прошло или не существует.",
             show_alert=True
         )
+
+
+# === АДМИН-ПАНЕЛЬ ===
+
+@router.message(F.text == "👑 Админ-панель")
+async def admin_panel(message: Message, state: FSMContext):
+    """Главное меню администратора."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к админ-панели.")
+        return
+    
+    await state.clear()
+    await message.answer(
+        "👑 <b>Панель администратора</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_menu_keyboard()
+    )
+
+
+@router.callback_query(F.data == "admin_panel")
+async def process_admin_panel(callback: CallbackQuery, state: FSMContext):
+    """Inline вход в админ-панель."""
+    await callback.answer()
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    await state.clear()
+    await callback.message.edit_text(
+        "👑 <b>Панель администратора</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_menu_keyboard()
+    )
+
+
+@router.callback_query(F.data == "admin_stats")
+async def process_admin_stats(callback: CallbackQuery):
+    """Статистика бронирований за сегодня."""
+    await callback.answer()
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    try:
+        stats = await db.get_today_stats()
+        
+        text = (
+            f"📊 <b>Статистика за {stats['date']}</b>\n\n"
+            f"📋 Всего броней: <b>{stats['total']}</b>\n"
+            f"✅ Активных: <b>{stats['active']}</b>\n"
+            f"❌ Отменено: <b>{stats['cancelled']}</b>\n\n"
+        )
+        
+        if stats['top_rooms']:
+            text += "🏢 <b>Топ комнат:</b>\n"
+            for room_id, count in stats['top_rooms']:
+                room_name = ROOMS.get(room_id, {}).get('name', room_id)
+                text += f"  • {room_name}: {count} броней\n"
+        else:
+            text += "🏢 Сегодня броней пока нет."
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_menu_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при получении статистики.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+
+
+@router.callback_query(F.data == "admin_force_cancel")
+async def process_admin_force_cancel(callback: CallbackQuery, state: FSMContext):
+    """Начало принудительной отмены брони."""
+    await callback.answer()
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.force_cancel)
+    await callback.message.edit_text(
+        "🚫 <b>Принудительная отмена брони</b>\n\n"
+        "Введите ID брони, которую нужно отменить:\n"
+        "(только число, например: 42)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
+        ])
+    )
+
+
+@router.message(AdminStates.force_cancel)
+async def process_admin_force_cancel_id(message: Message, state: FSMContext):
+    """Обработка ID брони для принудительной отмены."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа.")
+        await state.clear()
+        return
+    
+    text = message.text.strip()
+    
+    # Проверяем, что введено число
+    if not text.isdigit():
+        await message.answer(
+            "⚠️ Пожалуйста, введите только число (ID брони).",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
+            ])
+        )
+        return
+    
+    booking_id = int(text)
+    
+    try:
+        success = await db.admin_cancel_booking(booking_id)
+        
+        if success:
+            await message.answer(
+                f"✅ Бронь <b>#{booking_id}</b> успешно отменена администратором.",
+                reply_markup=get_admin_menu_keyboard()
+            )
+        else:
+            await message.answer(
+                f"ℹ️ Бронь <b>#{booking_id}</b> не найдена или уже отменена.",
+                reply_markup=get_admin_menu_keyboard()
+            )
+    except Exception as e:
+        logger.error(f"Ошибка принудительной отмены: {e}")
+        await message.answer(
+            "⚠️ Произошла ошибка при отмене брони.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+    
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin_broadcast")
+async def process_admin_broadcast(callback: CallbackQuery, state: FSMContext):
+    """Начало рассылки объявления."""
+    await callback.answer()
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.broadcast)
+    await callback.message.edit_text(
+        "📢 <b>Рассылка объявления</b>\n\n"
+        "Введите текст, который будет разослан ВСЕМ пользователям:\n"
+        "(поддерживается HTML-разметка)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
+        ])
+    )
+
+
+@router.message(AdminStates.broadcast)
+async def process_admin_broadcast_text(message: Message, state: FSMContext):
+    """Отправка рассылки всем пользователям."""
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа.")
+        await state.clear()
+        return
+    
+    broadcast_text = message.text.strip()
+    
+    if len(broadcast_text) < 5:
+        await message.answer(
+            "⚠️ Текст слишком короткий. Минимум 5 символов.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
+            ])
+        )
+        return
+    
+    try:
+        users = await db.get_all_unique_users()
+        
+        if not users:
+            await message.answer(
+                "ℹ️ В базе пока нет зарегистрированных пользователей для рассылки.",
+                reply_markup=get_admin_menu_keyboard()
+            )
+            await state.clear()
+            return
+        
+        sent_count = 0
+        failed_count = 0
+        
+        for user in users:
+            tg_id = user.get("telegram_id")
+            vk_id = user.get("vk_id")
+            
+            # Отправляем в Telegram (приоритет, если есть связка)
+            if tg_id:
+                try:
+                    await bot.send_message(
+                        chat_id=int(tg_id),
+                        text=f"📢 <b>Объявление</b>\n\n{broadcast_text}"
+                    )
+                    sent_count += 1
+                    await asyncio.sleep(0.1)  # Небольшая задержка
+                except Exception as e:
+                    logger.error(f"Ошибка рассылки в TG {tg_id}: {e}")
+                    failed_count += 1
+            
+            # Если нет TG ID, отправляем в VK
+            elif vk_id:
+                try:
+                    # VK API для отправки сообщений требует отдельного подхода
+                    # Пока пропускаем, так как vk_bot не импортирован в tg_bot
+                    failed_count += 1
+                except Exception as e:
+                    logger.error(f"Ошибка рассылки в VK {vk_id}: {e}")
+                    failed_count += 1
+        
+        await message.answer(
+            f"✅ <b>Рассылка завершена</b>\n\n"
+            f"📤 Отправлено: <b>{sent_count}</b>\n"
+            f"❌ Ошибок: <b>{failed_count}</b>\n"
+            f"👥 Всего пользователей: <b>{len(users)}</b>",
+            reply_markup=get_admin_menu_keyboard()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка рассылки: {e}")
+        await message.answer(
+            "⚠️ Произошла ошибка при рассылке.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+    
+    await state.clear()
 
 
 # === ЗАПУСК ===
