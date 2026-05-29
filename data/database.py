@@ -183,8 +183,8 @@ class GoogleSheetsDB:
             raise ValidationError("Неверный формат даты или времени")
 
         now = datetime.now(TIMEZONE)
-        start_dt = datetime.combine(date_obj, start_time)
-        end_dt = datetime.combine(date_obj, end_time)
+        start_dt = datetime.combine(date_obj, start_time).replace(tzinfo=TIMEZONE)
+        end_dt = datetime.combine(date_obj, end_time).replace(tzinfo=TIMEZONE)
 
         # Проверка на прошедшее время
         if start_dt < now:
@@ -268,7 +268,7 @@ class GoogleSheetsDB:
                 try:
                     date_str = booking.get("Дата", "")
                     end_time_str = booking.get("Время Конца", "")
-                    end_dt = datetime.strptime(f"{date_str} {end_time_str}", "%d.%m.%Y %H:%M")
+                    end_dt = datetime.strptime(f"{date_str} {end_time_str}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
                     if end_dt > now:
                         user_bookings.append(booking)
                 except (ValueError, TypeError):
@@ -379,7 +379,7 @@ class GoogleSheetsDB:
             if str(record.get("auth_code", "")) == auth_code:
                 expires_str = record.get("code_expires", "")
                 try:
-                    expires = datetime.strptime(expires_str, "%d.%m.%Y %H:%M")
+                    expires = datetime.strptime(expires_str, "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
                     if datetime.now(TIMEZONE) > expires:
                         # Код истёк - удаляем запись
                         self._sync_delete_user_auth_by_code(auth_code)
@@ -408,8 +408,8 @@ class GoogleSheetsDB:
     async def check_slot_availability(self, date_str, room_id, start_time_str, end_time_str):
         """Проверяет, свободен ли слот для бронирования."""
         bookings = await self.get_bookings_by_date_and_room(date_str, room_id)
-        new_start = datetime.strptime(f"{date_str} {start_time_str}", "%d.%m.%Y %H:%M")
-        new_end = datetime.strptime(f"{date_str} {end_time_str}", "%d.%m.%Y %H:%M")
+        new_start = datetime.strptime(f"{date_str} {start_time_str}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
+        new_end = datetime.strptime(f"{date_str} {end_time_str}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
 
         for booking in bookings:
             try:
@@ -584,15 +584,15 @@ class GoogleSheetsDB:
             end_str = f"{end_hour:02d}:{end_minute:02d}"
 
             is_free = True
-            slot_start = datetime.strptime(f"{date_str} {start_str}", "%d.%m.%Y %H:%M")
-            slot_end = datetime.strptime(f"{date_str} {end_str}", "%d.%m.%Y %H:%M")
+            slot_start = datetime.strptime(f"{date_str} {start_str}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
+            slot_end = datetime.strptime(f"{date_str} {end_str}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
 
             for booking in bookings:
                 try:
                     b_start = datetime.strptime(
-                        f"{booking['Дата']} {booking['Время Начала']}", "%d.%m.%Y %H:%M")
+                        f"{booking['Дата']} {booking['Время Начала']}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
                     b_end = datetime.strptime(
-                        f"{booking['Дата']} {booking['Время Конца']}", "%d.%m.%Y %H:%M")
+                        f"{booking['Дата']} {booking['Время Конца']}", "%d.%m.%Y %H:%M").replace(tzinfo=TIMEZONE)
                 except (ValueError, KeyError):
                     continue
                 if slot_start < b_end and slot_end > b_start:

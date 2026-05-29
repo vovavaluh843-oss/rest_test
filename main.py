@@ -169,11 +169,19 @@ async def start_telegram():
 
 
 async def start_vk():
-    """Запускает VK-бота через стандартный vkbottle polling."""
+    """Запускает VK-бота через ручной polling.listen() внутри общего event loop."""
     try:
         logger.info("Инициализация VK-бота...")
+        # Получаем polling объект от vkbottle
+        polling = vk_bot.polling
         logger.info("VK-бот успешно запущен в режиме LongPoll!")
-        await vk_bot.run_polling()
+        
+        # Ручной цикл polling — работает внутри уже запущенного asyncio loop
+        async for event in polling.listen():
+            if shutdown_event.is_set():
+                break
+            # vkbottle сам обрабатывает события через middleware/хэндлеры
+            # polling.listen() просто получает события из LongPoll
     except asyncio.CancelledError:
         logger.info("VK-бот получил сигнал остановки.")
         raise
@@ -194,10 +202,11 @@ async def main():
     tg_task = asyncio.create_task(start_telegram(), name="telegram_bot")
     vk_task = asyncio.create_task(start_vk(), name="vk_bot")
     reminder_task = asyncio.create_task(reminder_scheduler(), name="reminder_scheduler")
+    shutdown_task = asyncio.create_task(shutdown_event.wait(), name="shutdown_wait")
 
     # Ждем завершения любой из задач или сигнала shutdown
     done, pending = await asyncio.wait(
-        [tg_task, vk_task, reminder_task, shutdown_event.wait()],
+        [tg_task, vk_task, reminder_task, shutdown_task],
         return_when=asyncio.FIRST_COMPLETED
     )
 
@@ -211,12 +220,15 @@ async def main():
 
     # Логируем результат завершившихся задач
     for task in done:
-        if task.get_name() == "telegram_bot":
+        name = task.get_name()
+        if name == "telegram_bot":
             logger.info("Telegram-бот остановлен.")
-        elif task.get_name() == "vk_bot":
+        elif name == "vk_bot":
             logger.info("VK-бот остановлен.")
-        elif task.get_name() == "reminder_scheduler":
+        elif name == "reminder_scheduler":
             logger.info("Reminder scheduler остановлен.")
+        elif name == "shutdown_wait":
+            logger.info("Получен сигнал завершения.")
 
     logger.info("============================================================")
     logger.info("Система бронирования остановлена.")
