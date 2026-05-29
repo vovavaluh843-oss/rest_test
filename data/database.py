@@ -219,7 +219,21 @@ class GoogleSheetsDB:
         return await loop.run_in_executor(None, self._sync_get_all_bookings)
 
     def _sync_get_all_bookings(self):
-        records = self._bookings_sheet.get_all_records()
+        """Получает все бронирования из таблицы. Обрабатывает дублирующиеся заголовки."""
+        all_values = self._bookings_sheet.get_all_values()
+        if len(all_values) <= 1:
+            return []
+
+        headers = all_values[0]
+        records = []
+        for row in all_values[1:]:
+            if not row or not row[0]:  # Пропускаем пустые строки
+                continue
+            record = {}
+            for i, header in enumerate(headers):
+                if header:  # Пропускаем пустые заголовки
+                    record[header] = row[i] if i < len(row) else ""
+            records.append(record)
         return records
 
     async def get_bookings_by_date_and_room(self, date_str, room_id):
@@ -309,8 +323,23 @@ class GoogleSheetsDB:
             return []
 
     def _sync_get_all_users_auth(self):
+        """Получает все записи авторизации. Обрабатывает дублирующиеся заголовки."""
         try:
-            return self._users_auth_sheet.get_all_records()
+            all_values = self._users_auth_sheet.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            
+            headers = all_values[0]
+            records = []
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+                record = {}
+                for i, header in enumerate(headers):
+                    if header:
+                        record[header] = row[i] if i < len(row) else ""
+                records.append(record)
+            return records
         except Exception:
             return []
 
