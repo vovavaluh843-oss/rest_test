@@ -169,11 +169,11 @@ async def start_telegram():
 
 
 async def start_vk():
-    """Запускает VK-бота через polling.run() внутри общего event loop."""
+    """Запускает VK-бота через run_polling() внутри общего event loop."""
     try:
         logger.info("Инициализация VK-бота...")
-        # polling.run() слушает события LongPoll и передаёт их в диспетчер бота
-        polling_task = asyncio.create_task(vk_bot.polling.run())
+        # run_polling() слушает события LongPoll и передаёт их в диспетчер бота
+        polling_task = asyncio.create_task(vk_bot.run_polling())
         logger.info("VK-бот успешно запущен в режиме LongPoll!")
         
         # Ждём сигнала остановки
@@ -222,6 +222,19 @@ async def main():
             await task
         except asyncio.CancelledError:
             pass
+
+    # Закрываем HTTP-сессии ботов
+    try:
+        await tg_bot.session.close()
+        logger.info("Telegram HTTP-сессия закрыта.")
+    except Exception as e:
+        logger.error(f"Ошибка закрытия Telegram сессии: {e}")
+    
+    try:
+        await vk_bot.http.close()
+        logger.info("VK HTTP-сессия закрыта.")
+    except Exception as e:
+        logger.error(f"Ошибка закрытия VK сессии: {e}")
 
     # Логируем результат завершившихся задач
     for task in done:
