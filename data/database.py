@@ -130,11 +130,11 @@ class GoogleSheetsDB:
         return await loop.run_in_executor(None, self._sync_create_sheet)
 
     def _sync_create_sheet(self):
-        sheet = self._spreadsheet.add_worksheet(title=BOOKINGS_SHEET_NAME, rows=1000, cols=10)
+        sheet = self._spreadsheet.add_worksheet(title=BOOKINGS_SHEET_NAME, rows=1000, cols=11)
         headers = ["ID брони", "Имя", "Платформа", "ID пользователя",
-                   "Переговорка", "Дата", "Время Начала", "Время Конца", "Цель", "Статус"]
+                   "Переговорка", "Дата", "Время Начала", "Время Конца", "Цель", "Статус", "Уведомление"]
         sheet.append_row(headers)
-        sheet.format('A1:J1', {
+        sheet.format('A1:K1', {
             'textFormat': {'bold': True},
             'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
         })
@@ -464,7 +464,7 @@ class GoogleSheetsDB:
             # Запись в Google Sheets
             await self._append_booking_row(
                 booking_id, safe_name, safe_platform, safe_user_id, safe_room_id,
-                date_str, start_time_str, end_time_str, safe_purpose, "Активно")
+                date_str, start_time_str, end_time_str, safe_purpose, "Активно", "Нет")
 
             logger.info(f"Создано бронирование #{booking_id}: {safe_room_id} "
                         f"на {date_str} {start_time_str}-{end_time_str}")
@@ -491,13 +491,13 @@ class GoogleSheetsDB:
         return max_id + 1
 
     async def _append_booking_row(self, booking_id, user_name, platform, user_id,
-                                  room_id, date_str, start_time_str, end_time_str, purpose, status="Активно"):
+                                  room_id, date_str, start_time_str, end_time_str, purpose, status="Активно", notification_sent="Нет"):
         """Добавляет строку бронирования в таблицу."""
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None, self._sync_append_row,
             [booking_id, user_name, platform, user_id, room_id,
-             date_str, start_time_str, end_time_str, purpose, status])
+             date_str, start_time_str, end_time_str, purpose, status, notification_sent])
 
     def _sync_append_row(self, row_data):
         self._bookings_sheet.append_row(row_data)
@@ -608,6 +608,69 @@ class GoogleSheetsDB:
                 current_hour += 1
 
         return slots
+
+    async def get_bookings_needing_reminders(self, reminder_minutes: int = 30):
+        """
+        Получает брони, к которым осталось reminder_minutes минут до начала.
+        Возвращает только активные брони, для которых ещё не отправлено уведомление.
+        """
+        await self.connect()
+        now = datetime.now(TIMEZONE)
+        bookings_to_remind = []
+
+        for booking in await self.get_all_bookings():
+            # Проверяем статус и уведомление
+            if booking.get("Статус", "Активно") != "Активно":
+                continue
+            if booking.get("Уведомление", "Нет") == "Отправлено":
+                continue
+            
+            # Проверяем дату (только сегодня)
+            booking_date = booking.get("Дата", "")
+            today_str = now.strftime("%d.%m.%Y")
+            if booking_date != today_str:
+                continue
+            
+            # Проверяем время начала
+            try:
+                start_time_str = booking.get("Время Начала", "")
+                start_dt = datetime.strptime(f"{booking_date} {start_time_str}", "%d.%m.%Y %H:%M")
+                start_dt = start_dt.replace(tzinfo=TIMEZONE)
+                
+                # Разница в минутах
+                diff_minutes = (start_dt - now).total_seconds() / 60
+                
+                # Если осталось от 29 до 31 минуты (попадание в 30-минутное окно)
+                if 29 <= diff_minutes <= 31:
+                    bookings_to_remind.append(booking)
+            except (ValueError, TypeError):
+                continue
+        
+        return bookings_to_remind
+
+    async def mark_reminder_sent(self, booking_id: int):
+        """Отмечает, что уведомление для брони было отправлено."""
+        await self.connect()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._sync_mark_reminder_sent, booking_id)
+
+    def _sync_mark_reminder_sent(self, booking_id: int):
+        """Отмечает в таблице, что уведомление отправлено."""
+        all_values = self._bookings_sheet.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < 1:
+                continue
+            try:
+                row_id = int(row[0])
+                if row_id == booking_id:
+                    # Обновляем колонку K (11-я колонка, индекс 10)
+                    self._bookings_sheet.update_cell(idx, 11, "Отправлено")
+                    logger.info(f"Уведомление для брони #{booking_id} помечено как отправленное")
+                    return True
+            except (ValueError, IndexError):
+                continue
+        return False
 
 
 # Глобальный экземпляр базы данных
