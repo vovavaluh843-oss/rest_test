@@ -169,24 +169,15 @@ async def start_telegram():
 
 
 async def start_vk():
-    """Запускает VK-бота через run_polling() внутри общего event loop."""
+    """Запускает VK-бота вручную через polling.listen() + process_event()."""
     try:
         logger.info("Инициализация VK-бота...")
-        # run_polling() слушает события LongPoll и передаёт их в диспетчер бота
-        polling_task = asyncio.create_task(vk_bot.run_polling())
         logger.info("VK-бот успешно запущен в режиме LongPoll!")
-        
-        # Ждём сигнала остановки
-        while not shutdown_event.is_set():
-            await asyncio.sleep(1)
-        
-        # Отменяем polling
-        polling_task.cancel()
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-
+        # polling.listen() получает события из VK LongPoll, process_event() обрабатывает их через диспетчер
+        async for event in vk_bot.polling.listen():
+            if shutdown_event.is_set():
+                break
+            await vk_bot.process_event(event)
     except asyncio.CancelledError:
         logger.info("VK-бот получил сигнал остановки.")
         raise
@@ -203,50 +194,40 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Запускаем обе задачи параллельно + reminder scheduler
-    tg_task = asyncio.create_task(start_telegram(), name="telegram_bot")
-    vk_task = asyncio.create_task(start_vk(), name="vk_bot")
-    reminder_task = asyncio.create_task(reminder_scheduler(), name="reminder_scheduler")
-    shutdown_task = asyncio.create_task(shutdown_event.wait(), name="shutdown_wait")
+    # Запускаем reminder scheduler как отдельный таск
+    reminder_task = asyncio.create_task(reminder_scheduler())
 
-    # Ждем завершения любой из задач или сигнала shutdown
-    done, pending = await asyncio.wait(
-        [tg_task, vk_task, reminder_task, shutdown_task],
-        return_when=asyncio.FIRST_COMPLETED
-    )
-
-    # Отменяем оставшиеся задачи
-    for task in pending:
-        task.cancel()
+    # Запускаем ботов через gather
+    logger.info("Запуск polling для Telegram и VK...")
+    try:
+        await asyncio.gather(
+            dp.start_polling(tg_bot),
+            start_vk(),
+            shutdown_event.wait()
+        )
+    except Exception as e:
+        logger.error(f"Критическая ошибка при поллинге: {e}", exc_info=True)
+    finally:
+        # Graceful shutdown
+        logger.info("Остановка polling...")
+        # Закрываем сессии
         try:
-            await task
+            await tg_bot.session.close()
+            logger.info("Telegram HTTP-сессия закрыта.")
+        except Exception as e:
+            logger.error(f"Ошибка закрытия Telegram сессии: {e}")
+        try:
+            if hasattr(vk_bot.api, 'http_client'):
+                await vk_bot.api.http_client.close()
+                logger.info("VK HTTP-сессия закрыта.")
+        except Exception as e:
+            logger.error(f"Ошибка закрытия VK сессии: {e}")
+        # Отменяем reminder scheduler
+        reminder_task.cancel()
+        try:
+            await reminder_task
         except asyncio.CancelledError:
             pass
-
-    # Закрываем HTTP-сессии ботов
-    try:
-        await tg_bot.session.close()
-        logger.info("Telegram HTTP-сессия закрыта.")
-    except Exception as e:
-        logger.error(f"Ошибка закрытия Telegram сессии: {e}")
-    
-    try:
-        await vk_bot.http.close()
-        logger.info("VK HTTP-сессия закрыта.")
-    except Exception as e:
-        logger.error(f"Ошибка закрытия VK сессии: {e}")
-
-    # Логируем результат завершившихся задач
-    for task in done:
-        name = task.get_name()
-        if name == "telegram_bot":
-            logger.info("Telegram-бот остановлен.")
-        elif name == "vk_bot":
-            logger.info("VK-бот остановлен.")
-        elif name == "reminder_scheduler":
-            logger.info("Reminder scheduler остановлен.")
-        elif name == "shutdown_wait":
-            logger.info("Получен сигнал завершения.")
 
     logger.info("============================================================")
     logger.info("Система бронирования остановлена.")
