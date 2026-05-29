@@ -169,19 +169,15 @@ async def start_telegram():
 
 
 async def start_vk():
-    """Запускает VK-бота через ручной polling.listen() внутри общего event loop."""
+    """Запускает VK-бота через run_polling() в отдельном потоке (thread)."""
     try:
         logger.info("Инициализация VK-бота...")
-        # Получаем polling объект от vkbottle
-        polling = vk_bot.polling
         logger.info("VK-бот успешно запущен в режиме LongPoll!")
         
-        # Ручной цикл polling — работает внутри уже запущенного asyncio loop
-        async for event in polling.listen():
-            if shutdown_event.is_set():
-                break
-            # vkbottle сам обрабатывает события через middleware/хэндлеры
-            # polling.listen() просто получает события из LongPoll
+        # Запускаем в отдельном потоке, чтобы не блокировать asyncio event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, vk_bot.run_polling)
+        
     except asyncio.CancelledError:
         logger.info("VK-бот получил сигнал остановки.")
         raise

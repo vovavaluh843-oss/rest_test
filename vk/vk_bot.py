@@ -48,14 +48,6 @@ def rate_limit():
             return await handler(message, **kwargs)
         return wrapper
     return decorator
-    """Проверяет, не превышен ли rate limit для пользователя."""
-    now = time.time()
-    last_time = _last_request_time.get(user_id, 0)
-    if now - last_time < THROTTLE_INTERVAL:
-        logger.warning(f"Rate limit triggered for VK user {user_id}")
-        return False
-    _last_request_time[user_id] = now
-    return True
 
 
 # === ИНИЦИАЛИЗАЦИЯ БОТА ===
