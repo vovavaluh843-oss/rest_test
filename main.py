@@ -31,15 +31,14 @@ file_handler = logging.handlers.RotatingFileHandler(
 file_handler.setFormatter(formatter)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format=LOG_FORMAT,
     handlers=[console_handler, file_handler]
 )
 logger = logging.getLogger(__name__)
 
-# Включаем DEBUG для vkbottle
-from vkbottle import logger as vk_logger
-vk_logger.setLevel(logging.DEBUG)
+# Устанавливаем DEBUG для vkbottle через стандартный logging
+logging.getLogger("vkbottle").setLevel(logging.DEBUG)
 
 # Глобальный флаг для graceful shutdown
 shutdown_event = asyncio.Event()
