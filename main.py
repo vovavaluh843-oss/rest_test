@@ -4,6 +4,7 @@ import logging.handlers
 import os
 import signal
 import sys
+import threading
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
 from vk.vk_bot import bot as vk_bot
@@ -42,6 +43,23 @@ logging.getLogger("vkbottle").setLevel(logging.DEBUG)
 
 # Глобальный флаг для graceful shutdown
 shutdown_event = asyncio.Event()
+
+
+def run_vk_bot():
+    """Запускает VK бота в отдельном потоке со своим event loop."""
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        logger.info("VK бот запускается в отдельном потоке...")
+        vk_bot.run_forever()
+    except Exception as e:
+        logger.error(f"Ошибка в VK боте: {e}")
+    finally:
+        try:
+            loop.close()
+        except:
+            pass
 
 
 async def send_reminder(booking, tg_bot, vk_bot):
@@ -108,7 +126,6 @@ async def reminder_scheduler():
     
     while not shutdown_event.is_set():
         try:
-            # Получаем брони, требующие напоминания
             bookings_to_remind = await db.get_bookings_needing_reminders(reminder_minutes=30)
             
             if bookings_to_remind:
@@ -116,9 +133,8 @@ async def reminder_scheduler():
                 
                 for booking in bookings_to_remind:
                     await send_reminder(booking, tg_bot, vk_bot)
-                    await asyncio.sleep(1)  # Небольшая задержка между отправками
+                    await asyncio.sleep(1)
             
-            # Ждем минуту перед следующей проверкой
             await asyncio.sleep(60)
             
         except Exception as e:
@@ -149,9 +165,14 @@ async def main():
     await tg_bot.delete_webhook(drop_pending_updates=True)
     logger.info("Инициализация VK-бота...")
 
-    logger.info("Запуск polling для Telegram и VK...")
+    # Запускаем VK бота в ОТДЕЛЬНОМ ПОТОКЕ
+    vk_thread = threading.Thread(target=run_vk_bot, daemon=True)
+    vk_thread.start()
+    logger.info("✅ VK бот запущен в отдельном потоке")
+
+    logger.info("Запуск polling для Telegram...")
     tg_task = asyncio.create_task(dp.start_polling(tg_bot))
-    vk_task = asyncio.create_task(vk_bot.run_polling())
+    
     try:
         # Держим приложение активным, пока не поступит сигнал остановки
         await shutdown_event.wait()
@@ -161,11 +182,10 @@ async def main():
         logger.info("Начало graceful shutdown...")
         # Мягко отменяем все фоновые задачи
         tg_task.cancel()
-        vk_task.cancel()
         if 'reminder_task' in locals():
             reminder_task.cancel()
         # Дожидаемся их корректного завершения, игнорируя ошибки отмены
-        await asyncio.gather(tg_task, vk_task, return_exceptions=True)
+        await asyncio.gather(tg_task, return_exceptions=True)
         if 'reminder_task' in locals():
             await asyncio.gather(reminder_task, return_exceptions=True)
         # Закрываем HTTP-сессии
@@ -174,12 +194,6 @@ async def main():
             logger.info("Telegram HTTP-сессия закрыта.")
         except Exception as e:
             logger.error(f"Ошибка закрытия Telegram сессии: {e}")
-        try:
-            if hasattr(vk_bot.api, 'http_client'):
-                await vk_bot.api.http_client.close()
-                logger.info("VK HTTP-сессия закрыта.")
-        except Exception as e:
-            logger.error(f"Ошибка закрытия VK сессии: {e}")
 
     logger.info("============================================================")
     logger.info("Система бронирования остановлена.")
