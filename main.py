@@ -85,7 +85,7 @@ async def send_reminder(booking, tg_bot, vk_bot):
         
         # Отправляем в VK
         try:
-            await vk_module.bot.api.messages.send(
+            await vk_bot.api.messages.send(
                 user_id=int(user_id),
                 message=message,
                 random_id=0
@@ -108,7 +108,7 @@ async def send_reminder(booking, tg_bot, vk_bot):
                     logger.error(f"Ошибка отправки в TG: {e}")
             elif platform == "VK":
                 try:
-                    await vk_module.bot.api.messages.send(
+                    await vk_bot.api.messages.send(
                         user_id=int(user_id),
                         message=message,
                         random_id=0
@@ -140,7 +140,7 @@ async def reminder_scheduler():
                 logger.info(f"Найдено {len(bookings_to_remind)} броней для напоминания")
                 
                 for booking in bookings_to_remind:
-                    await send_reminder(booking, tg_bot, vk_bot)
+                    await send_reminder(booking, tg_bot, vk_module.bot)
                     await asyncio.sleep(1)  # Небольшая задержка между отправками
             
             # Ждем минуту перед следующей проверкой
