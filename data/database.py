@@ -542,37 +542,29 @@ class GoogleSheetsDB:
                 already_cancelled - была ли бронь уже отменена ранее
         """
         await self.connect()
+        # Получаем все связанные ID
+        linked_ids = await self.get_linked_user_ids(user_id, platform)
+        logger.info(f"cancel_booking: user_id={user_id}, platform={platform}, linked_ids={linked_ids}")
+        
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._sync_cancel_booking, booking_id, user_id)
+            None, self._sync_cancel_booking, booking_id, linked_ids)
 
-    def _sync_cancel_booking(self, booking_id, user_id):
+    def _sync_cancel_booking(self, booking_id, allowed_ids):
         """
         Устанавливает статус "Отменено" для бронирования (soft delete).
+        
+        Args:
+            booking_id: ID брони
+            allowed_ids: множество всех связанных ID пользователя (TG и VK)
         
         Returns:
             tuple: (success: bool, already_cancelled: bool)
         """
-        # 1. Получаем все связанные ID для пользователя
-        allowed_ids = {str(user_id)}
-        
-        try:
-            records = self._sync_get_all_users_auth()
-            for record in records:
-                tg_id = str(record.get("telegram_id", ""))
-                vk_id = str(record.get("vk_id", ""))
-                
-                if tg_id == str(user_id) and vk_id:
-                    allowed_ids.add(vk_id)
-                if vk_id == str(user_id) and tg_id:
-                    allowed_ids.add(tg_id)
-        except Exception as e:
-            logger.error(f"Ошибка при получении связанных ID для отмены брони: {e}")
-        
-        # 2. Ищем бронь и проверяем статус
+        # Ищем бронь и проверяем статус
         all_values = self._bookings_sheet.get_all_values()
         for idx, row in enumerate(all_values[1:], start=2):
-            if len(row) < 4:
+            if len(row) < 10:
                 continue
             try:
                 row_id = int(row[0])
@@ -588,10 +580,11 @@ class GoogleSheetsDB:
                     
                     # Soft delete: обновляем статус вместо удаления
                     self._bookings_sheet.update_cell(idx, 10, "Отменено")
-                    logger.info(f"Бронирование #{booking_id} отменено (soft delete) пользователем {user_id}")
+                    logger.info(f"Бронирование #{booking_id} отменено (soft delete), user_id в записи: {row_user_id}")
                     return True, False
             except (ValueError, IndexError):
                 continue
+        logger.warning(f"Бронь #{booking_id} не найдена или не принадлежит пользователю")
         return False, False
 
     async def get_available_slots(self, date_str, room_id):
