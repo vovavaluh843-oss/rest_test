@@ -694,20 +694,6 @@ async def process_admin_broadcast(message: Message):
     await bot.state_dispenser.delete(message.peer_id)
 
 
-# === CATCH-ALL DEBUG ХЭНДЛЕР ===
-@bot.on.message()
-async def catch_all_messages(message: Message):
-    """Перехватывает нераспознанные текстовые сообщения."""
-    if not message.text:
-        return
-    logger.info(f"Unrecognized VK message: '{message.text}' from {message.from_id}")
-    await message.answer(
-        "Я не понял команду.\n\n"
-        "Напишите «Начать» для возврата в меню.",
-        keyboard=get_main_menu_keyboard(message.from_id)
-    )
-
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting VK bot directly...")
