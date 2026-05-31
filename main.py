@@ -4,10 +4,9 @@ import logging.handlers
 import os
 import signal
 import sys
-import threading
+import subprocess
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
-from vk.vk_bot import bot as vk_bot
 from data.database import db
 from config import ROOMS, TIMEZONE
 
@@ -45,23 +44,6 @@ logging.getLogger("vkbottle").setLevel(logging.DEBUG)
 shutdown_event = asyncio.Event()
 
 
-def run_vk_bot():
-    """Запускает VK бота в отдельном потоке со своим event loop."""
-    import asyncio
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        logger.info("VK бот запускается в отдельном потоке...")
-        vk_bot.run_forever()
-    except Exception as e:
-        logger.error(f"Ошибка в VK боте: {e}")
-    finally:
-        try:
-            loop.close()
-        except:
-            pass
-
-
 async def send_reminder(booking, tg_bot, vk_bot):
     """Отправляет напоминание пользователю через связанные платформы."""
     try:
@@ -91,8 +73,11 @@ async def send_reminder(booking, tg_bot, vk_bot):
             except Exception as e:
                 logger.error(f"Ошибка отправки напоминания в TG: {e}")
         
+        # Для VK используем API напрямую через requests (т.к. VK бот в отдельном процессе)
+        # Или импортируем vk_bot только для API calls
         try:
-            await vk_bot.api.messages.send(user_id=int(user_id), message=message, random_id=0)
+            from vk.vk_bot import bot as vk_bot_instance
+            await vk_bot_instance.api.messages.send(user_id=int(user_id), message=message, random_id=0)
             sent_vk = True
             logger.info(f"Напоминание отправлено в VK для брони #{booking_id}")
         except Exception as e:
@@ -107,7 +92,8 @@ async def send_reminder(booking, tg_bot, vk_bot):
                     logger.error(f"Ошибка отправки в TG: {e}")
             elif platform == "VK":
                 try:
-                    await vk_bot.api.messages.send(user_id=int(user_id), message=message, random_id=0)
+                    from vk.vk_bot import bot as vk_bot_instance
+                    await vk_bot_instance.api.messages.send(user_id=int(user_id), message=message, random_id=0)
                     logger.info(f"Напоминание отправлено в VK (без связки) для брони #{booking_id}")
                 except Exception as e:
                     logger.error(f"Ошибка отправки в VK: {e}")
@@ -132,7 +118,7 @@ async def reminder_scheduler():
                 logger.info(f"Найдено {len(bookings_to_remind)} броней для напоминания")
                 
                 for booking in bookings_to_remind:
-                    await send_reminder(booking, tg_bot, vk_bot)
+                    await send_reminder(booking, tg_bot, None)
                     await asyncio.sleep(1)
             
             await asyncio.sleep(60)
@@ -163,31 +149,41 @@ async def main():
     # Подготовка ботов
     logger.info("Инициализация Telegram-бота...")
     await tg_bot.delete_webhook(drop_pending_updates=True)
-    logger.info("Инициализация VK-бота...")
-
-    # Запускаем VK бота в ОТДЕЛЬНОМ ПОТОКЕ
-    vk_thread = threading.Thread(target=run_vk_bot, daemon=True)
-    vk_thread.start()
-    logger.info("✅ VK бот запущен в отдельном потоке")
+    
+    # Запускаем VK бота как ОТДЕЛЬНЫЙ ПРОЦЕСС
+    logger.info("Инициализация VK-бота (отдельный процесс)...")
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    vk_process = subprocess.Popen(
+        [sys.executable, "-m", "vk"],
+        cwd=project_dir
+    )
+    logger.info(f"✅ VK бот запущен в отдельном процессе (PID: {vk_process.pid})")
 
     logger.info("Запуск polling для Telegram...")
-    tg_task = asyncio.create_task(dp.start_polling(tg_bot))
     
     try:
-        # Держим приложение активным, пока не поступит сигнал остановки
-        await shutdown_event.wait()
+        # Запускаем только Telegram бота в main event loop
+        await dp.start_polling(tg_bot)
     except asyncio.CancelledError:
         logger.info("Получен сигнал отмены.")
     finally:
         logger.info("Начало graceful shutdown...")
-        # Мягко отменяем все фоновые задачи
-        tg_task.cancel()
+        # Останавливаем VK процесс
+        if 'vk_process' in locals():
+            logger.info("Остановка VK бота...")
+            vk_process.terminate()
+            try:
+                vk_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                vk_process.kill()
+                vk_process.wait()
+            logger.info("✅ VK бот остановлен")
+        
+        # Мягко отменяем reminder scheduler
         if 'reminder_task' in locals():
             reminder_task.cancel()
-        # Дожидаемся их корректного завершения, игнорируя ошибки отмены
-        await asyncio.gather(tg_task, return_exceptions=True)
-        if 'reminder_task' in locals():
             await asyncio.gather(reminder_task, return_exceptions=True)
+        
         # Закрываем HTTP-сессии
         try:
             await tg_bot.session.close()
