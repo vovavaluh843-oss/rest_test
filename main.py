@@ -6,7 +6,7 @@ import signal
 import sys
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
-from vk import vk_bot as vk_module
+from vk.loader import bot as vk_bot
 from data.database import db
 from config import ROOMS, TIMEZONE
 
@@ -57,67 +57,45 @@ async def send_reminder(booking, tg_bot, vk_bot):
         
         room_name = ROOMS.get(room_id, {}).get("name", room_id)
         
-        # Текст уведомления
         message = f"⏰ Напоминание: У вас забронирована переговорка '{room_name}' на сегодня с {start_time} до {end_time}. Ждем вас!"
         
-        # Проверяем связанные аккаунты
         linked_ids = await db.get_linked_user_ids(user_id, platform)
         
         sent_tg = False
         sent_vk = False
         
-        # Отправляем в Telegram
         if "tg_id" in [k for k in linked_ids if k.startswith("tg_id")]:
-            # Проверяем, есть ли telegram_id
             try:
                 for link_id in linked_ids:
                     if not link_id.startswith("tg_") and len(link_id) > 5:
-                        # Это может быть telegram_id
-                        await tg_bot.send_message(
-                            chat_id=int(link_id),
-                            text=message
-                        )
+                        await tg_bot.send_message(chat_id=int(link_id), text=message)
                         sent_tg = True
                         logger.info(f"Напоминание отправлено в TG для брони #{booking_id}")
                         break
             except Exception as e:
                 logger.error(f"Ошибка отправки напоминания в TG: {e}")
         
-        # Отправляем в VK
         try:
-            await vk_bot.api.messages.send(
-                user_id=int(user_id),
-                message=message,
-                random_id=0
-            )
+            await vk_bot.api.messages.send(user_id=int(user_id), message=message, random_id=0)
             sent_vk = True
             logger.info(f"Напоминание отправлено в VK для брони #{booking_id}")
         except Exception as e:
             logger.error(f"Ошибка отправки напоминания в VK: {e}")
         
-        # Если не привязано никуда, отправляем на платформу создания
         if not sent_tg and not sent_vk:
             if platform == "TG":
                 try:
-                    await tg_bot.send_message(
-                        chat_id=int(user_id),
-                        text=message
-                    )
+                    await tg_bot.send_message(chat_id=int(user_id), text=message)
                     logger.info(f"Напоминание отправлено в TG (без связки) для брони #{booking_id}")
                 except Exception as e:
                     logger.error(f"Ошибка отправки в TG: {e}")
             elif platform == "VK":
                 try:
-                    await vk_bot.api.messages.send(
-                        user_id=int(user_id),
-                        message=message,
-                        random_id=0
-                    )
+                    await vk_bot.api.messages.send(user_id=int(user_id), message=message, random_id=0)
                     logger.info(f"Напоминание отправлено в VK (без связки) для брони #{booking_id}")
                 except Exception as e:
                     logger.error(f"Ошибка отправки в VK: {e}")
         
-        # Помечаем как отправленное
         await db.mark_reminder_sent(booking_id)
         
     except Exception as e:
@@ -140,7 +118,7 @@ async def reminder_scheduler():
                 logger.info(f"Найдено {len(bookings_to_remind)} броней для напоминания")
                 
                 for booking in bookings_to_remind:
-                    await send_reminder(booking, tg_bot, vk_module.bot)
+                    await send_reminder(booking, tg_bot, vk_bot)
                     await asyncio.sleep(1)  # Небольшая задержка между отправками
             
             # Ждем минуту перед следующей проверкой
@@ -175,9 +153,8 @@ async def main():
     logger.info("Инициализация VK-бота...")
 
     logger.info("Запуск polling для Telegram и VK...")
-    # Создаем отдельные задачи для ботов
     tg_task = asyncio.create_task(dp.start_polling(tg_bot))
-    vk_task = asyncio.create_task(vk_module.bot.run_polling())
+    vk_task = asyncio.create_task(vk_bot.run_polling())
     try:
         # Держим приложение активным, пока не поступит сигнал остановки
         await shutdown_event.wait()
@@ -201,8 +178,8 @@ async def main():
         except Exception as e:
             logger.error(f"Ошибка закрытия Telegram сессии: {e}")
         try:
-            if hasattr(vk_module.bot.api, 'http_client'):
-                await vk_module.bot.api.http_client.close()
+            if hasattr(vk_bot.api, 'http_client'):
+                await vk_bot.api.http_client.close()
                 logger.info("VK HTTP-сессия закрыта.")
         except Exception as e:
             logger.error(f"Ошибка закрытия VK сессии: {e}")
