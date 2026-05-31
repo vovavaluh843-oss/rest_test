@@ -6,7 +6,7 @@ import signal
 import sys
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
-from vk import vk_bot
+from vk import vk_bot as vk_module
 from data.database import db
 from config import ROOMS, TIMEZONE
 
@@ -85,7 +85,7 @@ async def send_reminder(booking, tg_bot, vk_bot):
         
         # Отправляем в VK
         try:
-            await vk_bot.api.messages.send(
+            await vk_module.bot.api.messages.send(
                 user_id=int(user_id),
                 message=message,
                 random_id=0
@@ -108,7 +108,7 @@ async def send_reminder(booking, tg_bot, vk_bot):
                     logger.error(f"Ошибка отправки в TG: {e}")
             elif platform == "VK":
                 try:
-                    await vk_bot.api.messages.send(
+                    await vk_module.bot.api.messages.send(
                         user_id=int(user_id),
                         message=message,
                         random_id=0
@@ -177,7 +177,7 @@ async def main():
     logger.info("Запуск polling для Telegram и VK...")
     # Создаем отдельные задачи для ботов
     tg_task = asyncio.create_task(dp.start_polling(tg_bot))
-    vk_task = asyncio.create_task(vk_bot.run_polling())
+    vk_task = asyncio.create_task(vk_module.bot.run_polling())
     try:
         # Держим приложение активным, пока не поступит сигнал остановки
         await shutdown_event.wait()
@@ -201,8 +201,8 @@ async def main():
         except Exception as e:
             logger.error(f"Ошибка закрытия Telegram сессии: {e}")
         try:
-            if hasattr(vk_bot.api, 'http_client'):
-                await vk_bot.api.http_client.close()
+            if hasattr(vk_module.bot.api, 'http_client'):
+                await vk_module.bot.api.http_client.close()
                 logger.info("VK HTTP-сессия закрыта.")
         except Exception as e:
             logger.error(f"Ошибка закрытия VK сессии: {e}")
