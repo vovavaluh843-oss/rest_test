@@ -127,6 +127,32 @@ async def reminder_scheduler():
             await asyncio.sleep(60)
 
 
+async def cleanup_scheduler():
+    """
+    Фоновая задача для удаления старых отменённых броней.
+    Запускается раз в сутки и удаляет отменённые брони старше 24 часов.
+    """
+    logger.info("✅ Cleanup scheduler запущен (удаление старых отменённых броней)")
+    
+    # Запускаем первую очистку через 5 минут после старта
+    await asyncio.sleep(300)
+    
+    while not shutdown_event.is_set():
+        try:
+            deleted_count = await db.cleanup_old_cancelled_bookings(days_to_keep=1)
+            if deleted_count > 0:
+                logger.info(f"🗑️ Удалено {deleted_count} старых отменённых броней")
+            else:
+                logger.debug("Нет старых отменённых броней для удаления")
+            
+            # Запускаем раз в 24 часа
+            await asyncio.sleep(86400)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в cleanup scheduler: {e}")
+            await asyncio.sleep(3600)  # Повторить через час при ошибке
+
+
 def signal_handler(sig, frame):
     """Обработчик сигналов SIGINT/SIGTERM для корректного завершения."""
     logger.info(f"Получен сигнал {sig.name}, инициируем graceful shutdown...")
@@ -142,8 +168,9 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Запускаем reminder scheduler как отдельный таск
+    # Запускаем фоновые задачи
     reminder_task = asyncio.create_task(reminder_scheduler())
+    cleanup_task = asyncio.create_task(cleanup_scheduler())
 
     # Подготовка ботов
     logger.info("Инициализация Telegram-бота...")
@@ -178,10 +205,11 @@ async def main():
                 vk_process.wait()
             logger.info("✅ VK бот остановлен")
         
-        # Мягко отменяем reminder scheduler
-        if 'reminder_task' in locals():
-            reminder_task.cancel()
-            await asyncio.gather(reminder_task, return_exceptions=True)
+        # Мягко отменяем фоновые задачи
+        for task in [reminder_task, cleanup_task]:
+            if task in locals():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
         
         # Закрываем HTTP-сессии
         try:

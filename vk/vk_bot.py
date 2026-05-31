@@ -30,7 +30,7 @@ def check_rate_limit(user_id: int) -> bool:
     now = time.time()
     last_time = _last_request_time.get(user_id, 0)
     if now - last_time < THROTTLE_INTERVAL:
-        logger.warning(f"Rate limit triggered for VK user {user_id}")
+        logger.warning(f"Rate limit triggered for VK user {user_id}") 
         return False
     _last_request_time[user_id] = now
     return True
@@ -153,13 +153,36 @@ def get_date_keyboard():
     return keyboard
 
 
-def get_time_keyboard(available_slots):
+def get_time_keyboard(available_slots, offset=0):
+    """
+    Генерирует клавиатуру с временем (максимум 5 строк по 2 кнопки).
+    available_slots: список всех доступных слотов [(start, end), ...]
+    offset: смещение (для пагинации)
+    """
     keyboard = Keyboard(one_time=False)
-    for start, end in available_slots[:8]:
-        keyboard.add(Text(f"🕐 {start}"), color=KeyboardButtonColor.PRIMARY)
+    start_idx = offset
+    end_idx = min(offset + 10, len(available_slots))  # 10 кнопок = 5 строк по 2
+    
+    for i in range(start_idx, end_idx, 2):
+        if i < len(available_slots):
+            start1, end1 = available_slots[i]
+            keyboard.add(Text(f"🕐 {start1}"), color=KeyboardButtonColor.PRIMARY)
+            if i + 1 < end_idx and i + 1 < len(available_slots):
+                start2, end2 = available_slots[i + 1]
+                keyboard.add(Text(f"🕐 {start2}"), color=KeyboardButtonColor.PRIMARY)
+            keyboard.row()
+    
+    # Кнопки навигации
+    if offset > 0:
+        keyboard.add(Text("◀️ Назад"), color=KeyboardButtonColor.SECONDARY)
+    if end_idx < len(available_slots):
+        keyboard.add(Text("Далее ▶️"), color=KeyboardButtonColor.PRIMARY)
+    
+    if offset > 0 or end_idx < len(available_slots):
         keyboard.row()
+    
     keyboard.add(Text("◀️ Назад к дате"), color=KeyboardButtonColor.NEGATIVE)
-    return keyboard
+    return keyboard, start_idx, end_idx
 
 
 def get_duration_keyboard():
@@ -187,6 +210,57 @@ def get_cancel_booking_keyboard(booking_id):
     keyboard.row()
     keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
     return keyboard
+
+
+def get_booking_selection_keyboard(bookings, offset=0):
+    """
+    Создаёт клавиатуру для выбора брони из списка.
+    Максимум 5 кнопок (VK API ограничение).
+    Каждый текст кнопки не более 40 символов.
+    
+    Args:
+        bookings: список бронирований
+        offset: смещение для пагинации
+        
+    Returns:
+        tuple: (keyboard, has_previous, has_next)
+    """
+    keyboard = Keyboard(one_time=False)
+    start_idx = offset
+    end_idx = min(offset + 5, len(bookings))  # 5 кнопок за раз
+    
+    for booking in bookings[start_idx:end_idx]:
+        booking_id = booking["ID брони"]
+        room_id = booking.get("Переговорка", "")
+        start_time = str(booking.get("Время Начала", ""))
+        end_time = str(booking.get("Время Конца", ""))
+        if ":" not in start_time:
+            start_time = f"{start_time}:00"
+        if ":" not in end_time:
+            end_time = f"{end_time}:00"
+        
+        # Короткий формат: #ID | комната | время (макс 40 символов)
+        label = f"#{booking_id} | {room_id} | {start_time}"
+        # Обрезаем до 40 символов если нужно
+        if len(label) > 40:
+            label = f"#{booking_id} | {start_time}"
+        
+        keyboard.add(Text(label), color=KeyboardButtonColor.NEGATIVE)
+        keyboard.row()
+    
+    # Кнопки навигации
+    has_prev = offset > 0
+    has_next = end_idx < len(bookings)
+    
+    if has_prev or has_next:
+        if has_prev:
+            keyboard.add(Text("◀️ Назад"), color=KeyboardButtonColor.SECONDARY)
+        if has_next:
+            keyboard.add(Text("Далее ▶️"), color=KeyboardButtonColor.PRIMARY)
+        keyboard.row()
+    
+    keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
+    return keyboard, has_prev, has_next
 
 
 # === ХРАНИЛИЩЕ ДАННЫХ ===
@@ -337,6 +411,7 @@ async def process_view_date_selection(message: Message):
 async def process_my_bookings(message: Message):
     user_id = str(message.peer_id)
     bookings = await db.get_user_bookings(user_id, "VK")
+    
     if not bookings:
         keyboard = Keyboard(one_time=False)
         keyboard.add(Text("📅 Забронировать"), color=KeyboardButtonColor.PRIMARY)
@@ -344,8 +419,20 @@ async def process_my_bookings(message: Message):
         keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
         await message.answer("📋 У вас пока нет активных бронирований.\n\nХотите забронировать комнату?", keyboard=keyboard)
         return
-    text = "📋 Ваши активные бронирования:\n\n"
-    for booking in bookings:
+    
+    # Сбрасываем offset при новом запросе
+    set_user_data(message.peer_id, {"my_bookings_offset": 0})
+    await show_my_bookings_page(message, bookings, 0)
+
+
+async def show_my_bookings_page(message: Message, bookings: list, offset: int):
+    """Показывает страницу бронирований с пагинацией."""
+    total_bookings = len(bookings)
+    start_idx = offset
+    end_idx = min(offset + 5, total_bookings)
+    
+    text = f"📋 Ваши активные бронирования ({start_idx + 1}-{end_idx} из {total_bookings}):\n\n"
+    for i, booking in enumerate(bookings[offset:end_idx], start=offset + 1):
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
         start_time = str(booking.get("Время Начала", ""))
         end_time = str(booking.get("Время Конца", ""))
@@ -353,9 +440,11 @@ async def process_my_bookings(message: Message):
             start_time = f"{start_time}:00"
         if ":" not in end_time:
             end_time = f"{end_time}:00"
-        text += f"🆔 #{booking['ID брони']}\n🏢 {room_name}\n📅 {booking['Дата']}\n🕐 {start_time} — {end_time}\n📝 {booking['Цель']}\n——————————————\n"
-    first_booking_id = bookings[0]["ID брони"]
-    await message.answer(text, keyboard=get_cancel_booking_keyboard(first_booking_id))
+        text += f"{i}. 🆔 #{booking['ID брони']}\n   🏢 {room_name}\n   📅 {booking['Дата']}\n   🕐 {start_time} — {end_time}\n   📝 {booking['Цель']}\n\n"
+    
+    text += "\n❌ Выберите бронь для отмены:"
+    keyboard, has_prev, has_next = get_booking_selection_keyboard(bookings, offset)
+    await message.answer(text, keyboard=keyboard)
 
 
 @bot.on.message(state=BookingState.SELECTING_ROOM)
@@ -404,7 +493,7 @@ async def process_date_selection(message: Message):
         await message.answer("⚠️ Пожалуйста, выберите дату из списка:", keyboard=get_date_keyboard())
         return
     date_str = date_match.group()
-    update_user_data(peer_id, date_str=date_str)
+    update_user_data(peer_id, date_str=date_str, time_offset=0)  # Сбрасываем offset
     data = get_user_data(peer_id)
     room_id = data["room_id"]
     available_slots = await db.get_available_slots(date_str, room_id)
@@ -412,7 +501,8 @@ async def process_date_selection(message: Message):
         await message.answer(f"📅 На {date_str} все слоты заняты.\n\nВыберите другую дату:", keyboard=get_date_keyboard())
         return
     await bot.state_dispenser.set(peer_id, BookingState.SELECTING_START_TIME)
-    await message.answer(f"📅 {date_str}\n\nВыберите время начала встречи:", keyboard=get_time_keyboard(available_slots))
+    keyboard, _, _ = get_time_keyboard(available_slots, 0)
+    await message.answer(f"📅 {date_str}\n\nВыберите время начала встречи:", keyboard=keyboard)
 
 
 @bot.on.message(state=BookingState.SELECTING_START_TIME)
@@ -420,18 +510,54 @@ async def process_date_selection(message: Message):
 async def process_time_selection(message: Message):
     text = message.text
     peer_id = message.peer_id
-    if "◀️ Назад" in text:
-        await bot.state_dispenser.set(peer_id, BookingState.SELECTING_DATE)
-        data = get_user_data(peer_id)
-        date_str = data.get("date_str", "")
-        room_id = data.get("room_id", "")
-        available_slots = await db.get_available_slots(date_str, room_id)
-        await message.answer(f"📅 {date_str}\n\nВыберите дату:", keyboard=get_date_keyboard())
-        return
+    
+    # Проверка: кнопка пагинации броней
+    if "Мои бронирования" not in text:
+        # Обычная навигация по времени
+        if "◀️ Назад" in text and "Далее" not in text:
+            await bot.state_dispenser.set(peer_id, BookingState.SELECTING_DATE)
+            data = get_user_data(peer_id)
+            date_str = data.get("date_str", "")
+            room_id = data.get("room_id", "")
+            available_slots = await db.get_available_slots(date_str, room_id)
+            await message.answer(f"📅 {date_str}\n\nВыберите время начала:", keyboard=get_date_keyboard())
+            return
+        
+        # Проверка: кнопка "Далее" для времени
+        if "Далее" in text:
+            data = get_user_data(peer_id)
+            offset = data.get("time_offset", 0) + 10
+            update_user_data(peer_id, time_offset=offset)
+            available_slots = await db.get_available_slots(data["date_str"], data["room_id"])
+            keyboard, _, _ = get_time_keyboard(available_slots, offset)
+            await message.answer(f"📅 {data['date_str']}\n\nВыберите время начала:", keyboard=keyboard)
+            return
+        
+        # Проверка: кнопка "Назад" для времени
+        if "◀️ Назад" in text:
+            data = get_user_data(peer_id)
+            offset = max(0, data.get("time_offset", 0) - 10)
+            update_user_data(peer_id, time_offset=offset)
+            available_slots = await db.get_available_slots(data["date_str"], data["room_id"])
+            keyboard, _, _ = get_time_keyboard(available_slots, offset)
+            await message.answer(f"📅 {data['date_str']}\n\nВыберите время начала:", keyboard=keyboard)
+            return
+    
+    # Проверка: пагинация броней
+    if "Мои бронирования" in text or "❌" in text:
+        # Это не навигация по времени, пропускаем
+        pass
+    
+    # Выбрано конкретное время
     time_match = re.search(r'(\d{2}:\d{2})', text)
     if not time_match:
-        await message.answer("⚠️ Пожалуйста, выберите время из списка:", keyboard=get_time_keyboard([]))
+        data = get_user_data(peer_id)
+        available_slots = await db.get_available_slots(data["date_str"], data["room_id"])
+        offset = data.get("time_offset", 0)
+        keyboard, _, _ = get_time_keyboard(available_slots, offset)
+        await message.answer("⚠️ Пожалуйста, выберите время из списка:", keyboard=keyboard)
         return
+    
     start_time = time_match.group(1)
     update_user_data(peer_id, start_time=start_time)
     await bot.state_dispenser.set(peer_id, BookingState.SELECTING_DURATION)
@@ -449,7 +575,9 @@ async def process_duration_selection(message: Message):
         date_str = data.get("date_str", "")
         room_id = data.get("room_id", "")
         available_slots = await db.get_available_slots(date_str, room_id)
-        await message.answer(f"📅 {date_str}\n\nВыберите время начала:", keyboard=get_time_keyboard(available_slots))
+        offset = data.get("time_offset", 0)
+        keyboard, _, _ = get_time_keyboard(available_slots, offset)
+        await message.answer(f"📅 {date_str}\n\nВыберите время начала:", keyboard=keyboard)
         return
     duration_map = {"30 минут": 30, "1 час": 60, "1.5 часа": 90, "2 часа": 120, "2.5 часа": 150, "3 часа": 180}
     duration_minutes = None
@@ -540,26 +668,103 @@ async def process_confirm(message: Message):
             pass
 
 
-@bot.on.message(func=lambda msg: msg.text and "Отменить бронь #" in msg.text)
+@bot.on.message(func=lambda msg: msg.text and "#" in msg.text and ("◀️ Назад" not in msg.text and "Далее" not in msg.text and "Главное меню" not in msg.text))
 @rate_limit()
 async def process_cancel_booking_by_id(message: Message):
-    match = re.search(r"#(\d+)", message.text)
+    # Парсим ID брони из текста кнопки (например: "#3 | loft_lounge |10:00")
+    match = re.search(r'#(\d+)', message.text)
     if not match:
         await message.answer("⚠️ Не удалось определить номер бронирования.")
         return
+    
     booking_id = int(match.group(1))
     user_id = str(message.from_id)
+    
     try:
         success, already_cancelled = await db.cancel_booking(booking_id, user_id, "VK")
+        
         if already_cancelled:
-            await message.answer(f"ℹ️ Бронирование #{booking_id} уже было отменено ранее.", keyboard=get_main_menu_keyboard(message.from_id))
-        elif success:
-            await message.answer(f"✅ Бронирование #{booking_id} успешно отменено!", keyboard=get_main_menu_keyboard(message.from_id))
+            await message.answer(
+                f"ℹ️ Бронирование #{booking_id} уже было отменено ранее.",
+                keyboard=get_main_menu_keyboard(message.from_id)
+            )
+            return
+        
+        if not success:
+            await message.answer(
+                f"❌ Не удалось найти или отменить бронирование #{booking_id}.\n"
+                f"Возможно, оно уже прошло или было отменено.",
+                keyboard=get_main_menu_keyboard(message.from_id)
+            )
+            return
+        
+        # ✅ Успешно отменено — даём Google Sheets время на обновление
+        await asyncio.sleep(0.5)
+        
+        # Перечитываем список броней
+        bookings = await db.get_user_bookings(user_id, "VK")
+        
+        if not bookings:
+            # Броней больше нет
+            keyboard = Keyboard(one_time=False)
+            keyboard.add(Text("📅 Забронировать"), color=KeyboardButtonColor.PRIMARY)
+            keyboard.row()
+            keyboard.add(Text("◀️ Главное меню"), color=KeyboardButtonColor.SECONDARY)
+            await message.answer(
+                f"✅ Бронирование #{booking_id} успешно отменено!\n\n"
+                f"📋 У вас больше нет активных бронирований.\n\n"
+                f"Хотите забронировать комнату?",
+                keyboard=keyboard
+            )
         else:
-            await message.answer(f"❌ Не удалось найти или отменить бронирование #{booking_id}.\nВозможно, оно уже прошло или было отменено.", keyboard=get_main_menu_keyboard(message.from_id))
+            # Показываем обновлённый список
+            text = f"✅ Бронирование #{booking_id} отменено!\n\n"
+            text += "📋 Ваши активные бронирования:\n\n"
+            for i, booking in enumerate(bookings, 1):
+                room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
+                start_time = str(booking.get("Время Начала", ""))
+                end_time = str(booking.get("Время Конца", ""))
+                if ":" not in start_time:
+                    start_time = f"{start_time}:00"
+                if ":" not in end_time:
+                    end_time = f"{end_time}:00"
+                text += f"{i}. 🆔 #{booking['ID брони']}\n   🏢 {room_name}\n   📅 {booking['Дата']}\n   🕐 {start_time} — {end_time}\n   📝 {booking['Цель']}\n\n"
+            
+            text += "\n❌ Выберите бронь для отмены:"
+            keyboard, _, _ = get_booking_selection_keyboard(bookings, 0)
+            await message.answer(text, keyboard=keyboard)
+            
     except Exception as e:
         logger.error(f"Ошибка при отмене бронирования: {e}")
-        await message.answer(f"⚠️ Произошла ошибка при отмене: {e}", keyboard=get_main_menu_keyboard(message.from_id))
+        await message.answer(
+            f"⚠️ Произошла ошибка при отмене: {e}",
+            keyboard=get_main_menu_keyboard(message.from_id)
+        )
+
+
+@bot.on.message(func=lambda msg: msg.text and ("Далее ▶️" in msg.text or "◀️ Назад" in msg.text) and "Мои бронирования" not in msg.text)
+@rate_limit()
+async def handle_bookings_pagination(message: Message):
+    """Обработка пагинации списка броней."""
+    peer_id = message.peer_id
+    user_id = str(peer_id)
+    
+    # Получаем бронирования
+    bookings = await db.get_user_bookings(user_id, "VK")
+    if not bookings:
+        return
+    
+    current_offset = get_user_data(peer_id).get("my_bookings_offset", 0)
+    
+    if "Далее ▶️" in message.text:
+        new_offset = min(current_offset + 5, len(bookings) - 1)
+    elif "◀️ Назад" in message.text:
+        new_offset = max(0, current_offset - 5)
+    else:
+        return
+    
+    update_user_data(peer_id, my_bookings_offset=new_offset)
+    await show_my_bookings_page(message, bookings, new_offset)
 
 
 @bot.on.message(text="Отменить бронь")

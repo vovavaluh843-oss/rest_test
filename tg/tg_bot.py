@@ -235,6 +235,32 @@ def get_cancel_booking_keyboard(booking_id):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def get_booking_selection_keyboard(bookings):
+    """
+    Создаёт клавиатуру для выбора брони из списка.
+    Максимум 5 строк по 2 кнопки (10 кнопок всего).
+    """
+    inline_keyboard = []
+    
+    for booking in bookings[:10]:  # Максимум 10 кнопок
+        booking_id = booking["ID брони"]
+        room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
+        start_time = str(booking.get("Время Начала", ""))
+        end_time = str(booking.get("Время Конца", ""))
+        if ":" not in start_time:
+            start_time = f"{start_time}:00"
+        if ":" not in end_time:
+            end_time = f"{end_time}:00"
+        
+        label = f"❌ #{booking_id} | {room_name}"
+        inline_keyboard.append([
+            InlineKeyboardButton(text=label, callback_data=f"cancel:{booking_id}")
+        ])
+    
+    inline_keyboard.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
 # === ОБРАБОТЧИКИ КОМАНД ===
 
 @router.message(Command("start"))
@@ -293,7 +319,7 @@ async def reply_today_bookings(message: Message):
             reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
         return
-
+    
     text = f"📅 <b>Бронирования на сегодня ({today_str}):</b>\n\n"
     for booking in bookings:
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
@@ -302,7 +328,7 @@ async def reply_today_bookings(message: Message):
             f"• <b>{booking['Время Начала']} — {booking['Время Конца']}</b> | "
             f"{room_name} ({username})\n"
         )
-
+    
     await message.answer(text, reply_markup=get_main_reply_keyboard(message.from_user.id))
 
 
@@ -326,27 +352,22 @@ async def reply_my_bookings(message: Message):
             reply_markup=get_main_reply_keyboard(message.from_user.id)
         )
         return
-
+    
     text = "📋 <b>Ваши активные бронирования:</b>\n\n"
-    for booking in bookings:
+    for i, booking in enumerate(bookings, 1):
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
         text += (
-            f"🆔 <b>#{booking['ID брони']}</b>\n"
-            f"🏢 {room_name}\n"
-            f"📅 {booking['Дата']}\n"
-            f"🕐 {booking['Время Начала']} — {booking['Время Конца']}\n"
-            f"📝 {booking['Цель']}\n"
-            f"——————————————\n"
+            f"{i}. 🆔 <b>#{booking['ID брони']}</b>\n"
+            f"   🏢 {room_name}\n"
+            f"   📅 {booking['Дата']}\n"
+            f"   🕐 {booking['Время Начала']} — {booking['Время Конца']}\n"
+            f"   📝 {booking['Цель']}\n\n"
         )
 
-    first_booking_id = bookings[0]["ID брони"]
-    await message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отменить последнюю бронь", callback_data=f"cancel:{first_booking_id}")],
-            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
-        ])
-    )
+    text += "❌ <b>Выберите бронь для отмены:</b>"
+    keyboard = get_booking_selection_keyboard(bookings)
+
+    await message.answer(text, reply_markup=keyboard)
 
 
 # === ИНЛАЙН ОБРАБОТЧИКИ ===
@@ -397,7 +418,7 @@ async def process_today_bookings(callback: CallbackQuery):
             reply_markup=get_main_menu_inline_keyboard()
         )
         return
-
+    
     text = f"📅 <b>Бронирования на сегодня ({today_str}):</b>\n\n"
     for booking in bookings:
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
@@ -406,7 +427,7 @@ async def process_today_bookings(callback: CallbackQuery):
             f"• <b>{booking['Время Начала']} — {booking['Время Конца']}</b> | "
             f"{room_name} ({username})\n"
         )
-
+    
     await callback.message.edit_text(text, reply_markup=get_main_menu_inline_keyboard())
 
 
@@ -444,7 +465,7 @@ async def process_link_vk(callback: CallbackQuery, state: FSMContext):
             "⚠️ Произошла ошибка при генерации кода. Попробуйте позже.",
             reply_markup=get_main_menu_inline_keyboard()
         )
-
+    
 
 @router.message(F.text == "🔗 Привязать ВКонтакте")
 async def reply_link_vk(message: Message, state: FSMContext):
@@ -904,22 +925,18 @@ async def process_my_bookings(callback: CallbackQuery, state: FSMContext):
         return
 
     caption = "📋 <b>Ваши активные бронирования:</b>\n\n"
-    for booking in bookings:
+    for i, booking in enumerate(bookings, 1):
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
         caption += (
-            f"🆔 <b>#{booking['ID брони']}</b>\n"
-            f"🏢 {room_name}\n"
-            f"📅 {booking['Дата']}\n"
-            f"🕐 {booking['Время Начала']} — {booking['Время Конца']}\n"
-            f"📝 {booking['Цель']}\n"
-            f"——————————————\n"
+            f"{i}. 🆔 <b>#{booking['ID брони']}</b>\n"
+            f"   🏢 {room_name}\n"
+            f"   📅 {booking['Дата']}\n"
+            f"   🕐 {booking['Время Начала']} — {booking['Время Конца']}\n"
+            f"   📝 {booking['Цель']}\n\n"
         )
 
-    first_booking_id = bookings[0]["ID брони"]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отменить последнюю бронь", callback_data=f"cancel:{first_booking_id}")],
-        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
-    ])
+    caption += "\n❌ <b>Выберите бронь для отмены:</b>"
+    keyboard = get_booking_selection_keyboard(bookings)
 
     if photo_msg_id and photo_chat_id:
         await bot.edit_message_caption(
@@ -962,25 +979,66 @@ async def process_cancel_specific_booking(callback: CallbackQuery, state: FSMCon
                 caption,
                 reply_markup=get_main_menu_inline_keyboard()
             )
-    elif success:
-        caption = f"✅ Бронирование <b>#{booking_id}</b> успешно отменено.\n\nВыберите действие:"
+        return
+    
+    if not success:
+        await callback.answer(
+            "Не удалось отменить бронирование. Возможно, оно уже прошло или не существует.",
+            show_alert=True
+        )
+        return
+    
+    # ✅ Успешно отменено — даём Google Sheets время на обновление
+    await asyncio.sleep(0.5)
+    
+    # Перечитываем список броней
+    bookings = await db.get_user_bookings(user_id, "TG")
+    
+    if not bookings:
+        # Броней больше нет
+        caption = (
+            f"✅ Бронирование <b>#{booking_id}</b> успешно отменено!\n\n"
+            f"📋 У вас больше нет активных бронирований.\n\n"
+            f"Выберите действие:"
+        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📅 Забронировать", callback_data="book_room")],
+            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="main_menu")]
+        ])
         if photo_msg_id and photo_chat_id:
             await bot.edit_message_caption(
                 chat_id=photo_chat_id,
                 message_id=photo_msg_id,
                 caption=caption,
-                reply_markup=get_main_menu_inline_keyboard()
+                reply_markup=keyboard
             )
         else:
-            await callback.message.edit_text(
-                caption,
-                reply_markup=get_main_menu_inline_keyboard()
-            )
+            await callback.message.edit_text(caption, reply_markup=keyboard)
     else:
-        await callback.answer(
-            "Не удалось отменить бронирование. Возможно, оно уже прошло или не существует.",
-            show_alert=True
-        )
+        # Показываем обновлённый список
+        caption = f"✅ Бронирование <b>#{booking_id}</b> отменено!\n\n"
+        caption += "📋 <b>Ваши активные бронирования:</b>\n\n"
+        for i, booking in enumerate(bookings, 1):
+            room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
+            caption += (
+                f"{i}. 🆔 <b>#{booking['ID брони']}</b>\n"
+                f"   🏢 {room_name}\n"
+                f"   📅 {booking['Дата']}\n"
+                f"   🕐 {booking['Время Начала']} — {booking['Время Конца']}\n"
+                f"   📝 {booking['Цель']}\n\n"
+            )
+        caption += "❌ <b>Выберите бронь для отмены:</b>"
+        keyboard = get_booking_selection_keyboard(bookings)
+        
+        if photo_msg_id and photo_chat_id:
+            await bot.edit_message_caption(
+                chat_id=photo_chat_id,
+                message_id=photo_msg_id,
+                caption=caption,
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(caption, reply_markup=keyboard)
 
 
 # === АДМИН-ПАНЕЛЬ ===

@@ -276,7 +276,7 @@ class GoogleSheetsDB:
         user_bookings = []
 
         for booking in await self.get_all_bookings():
-            # Проверяем статус бронирования
+            # Проверяем статус бронирования - ТОЛЬКО активные
             if booking.get("Статус", STATUS_ACTIVE) != STATUS_ACTIVE:
                 continue
 
@@ -809,6 +809,63 @@ class GoogleSheetsDB:
                 continue
         logger.warning(f"Админ: бронь #{booking_id} не найдена")
         return False
+
+    async def cleanup_old_cancelled_bookings(self, days_to_keep: int = 1) -> int:
+        """
+        Удаляет отменённые бронирования старше указанного количества дней.
+
+        Args:
+            days_to_keep: количество дней хранения отменённых броней (по умолчанию 1)
+            
+        Returns:
+            int: количество удалённых записей
+        """
+        await self.connect()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._sync_cleanup_old_cancelled_bookings, days_to_keep)
+
+    def _sync_cleanup_old_cancelled_bookings(self, days_to_keep: int) -> int:
+        """Синхронное удаление старых отменённых броней."""
+        all_values = self._bookings_sheet.get_all_values()
+        now = datetime.now(TIMEZONE)
+        cutoff_date = now - timedelta(days=days_to_keep)
+        deleted_count = 0
+        rows_to_delete = []
+        
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < 10:
+                continue
+            try:
+                row_status = row[9] if len(row) > 9 else STATUS_ACTIVE
+                
+                # Проверяем только отменённые брони
+                if row_status == STATUS_CANCELLED:
+                    # Получаем дату бронирования
+                    booking_date_str = row[5] if len(row) > 5 else ""
+                    try:
+                        booking_date = datetime.strptime(booking_date_str, "%d.%m.%Y").replace(tzinfo=TIMEZONE)
+                        # Если бронь отменена и дата старше cutoff_date - удаляем
+                        if booking_date < cutoff_date:
+                            rows_to_delete.append(idx)
+                            deleted_count += 1
+                    except (ValueError, TypeError):
+                        continue
+            except (ValueError, IndexError):
+                continue
+        
+        # Удаляем строки с конца, чтобы не сбить индексы
+        for idx in reversed(rows_to_delete):
+            try:
+                self._bookings_sheet.delete_rows(idx)
+                logger.info(f"Удалена старая отменённая бронь (строка {idx})")
+            except Exception as e:
+                logger.error(f"Ошибка удаления строки {idx}: {e}")
+        
+        if deleted_count > 0:
+            logger.info(f"Удалено {deleted_count} старых отменённых броней")
+        
+        return deleted_count
 
 
 # Глобальный экземпляр базы данных
