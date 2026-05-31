@@ -225,4 +225,7 @@ def format_bookings_list(bookings, date_str):
     return text
 
 
+# Импортируем хэндлеры для регистрации в labeler
+print("Импортируем хэндлеры...")
 from vk import handlers
+print("✅ vk_bot.py загрузился полностью!")

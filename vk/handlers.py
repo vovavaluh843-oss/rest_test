@@ -38,6 +38,9 @@ from vk.vk_bot import (
 )
 from data.database import db, BookingConflictError, ValidationError
 
+print("✅ Хэндлеры загружены!")
+
+
 # === RATE LIMITING ДЕКОРАТОР ===
 def rate_limit():
     """Декоратор для проверки rate limiting перед обработкой сообщения."""

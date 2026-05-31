@@ -9,6 +9,7 @@ from vkbottle import CtxStorage
 
 from config import VK_BOT_TOKEN
 
+print("Создаём объект бота...")
 # Создаём объект бота
 bot = Bot(token=VK_BOT_TOKEN)
 
@@ -17,6 +18,8 @@ labeler = bot.labeler
 
 # Создаём хранилище состояний
 storage = CtxStorage()
+
+print("✅ vk/loader.py загрузился успешно!")
 
 
 def get_bot():
