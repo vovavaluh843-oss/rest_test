@@ -9,26 +9,25 @@ import time
 import asyncio
 from datetime import datetime, timedelta
 
-from vkbottle.bot import Bot, Message
-from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, CtxStorage, Text
+from vkbottle import Keyboard, KeyboardButtonColor, BaseStateGroup, Text
+from vkbottle.bot import Message
 
+from vk.loader import bot, labeler, storage
 from config import VK_BOT_TOKEN, ROOMS, TIMEZONE, VK_ADMIN_IDS
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
 
 # === RATE LIMITING ===
-THROTTLE_INTERVAL = 1.0  # Минимальный интервал между запросами (сек)
+THROTTLE_INTERVAL = 1.0
 _last_request_time: dict[int, float] = {}
 
 
 def is_admin(user_id: int) -> bool:
-    """Проверяет, является ли пользователь администратором."""
     return user_id in VK_ADMIN_IDS
 
 
 def check_rate_limit(user_id: int) -> bool:
-    """Проверяет, не превышен ли rate limit для пользователя."""
     now = time.time()
     last_time = _last_request_time.get(user_id, 0)
     if now - last_time < THROTTLE_INTERVAL:
@@ -39,7 +38,6 @@ def check_rate_limit(user_id: int) -> bool:
 
 
 def rate_limit():
-    """Декоратор для проверки rate limiting перед обработкой сообщения."""
     def decorator(handler):
         async def wrapper(message: Message, **kwargs):
             if not check_rate_limit(message.from_id):
@@ -48,11 +46,6 @@ def rate_limit():
             return await handler(message, **kwargs)
         return wrapper
     return decorator
-
-
-# === ИНИЦИАЛИЗАЦИЯ БОТА ===
-bot = Bot(token=VK_BOT_TOKEN)
-storage = CtxStorage()
 
 
 class BookingState(BaseStateGroup):
@@ -64,11 +57,9 @@ class BookingState(BaseStateGroup):
     CONFIRMING = 6
     VIEWING_BOOKINGS = 7
     VIEWING_DATE_SELECT = 8
-    ADMIN_FORCE_CANCEL = 9   # Ожидание ID брони для принудительной отмены
-    ADMIN_BROADCAST = 10      # Ожидание текста для рассылки
+    ADMIN_FORCE_CANCEL = 9
+    ADMIN_BROADCAST = 10
 
-
-# === КЛАВИАТУРЫ ===
 
 def get_main_menu_keyboard(user_id: int = None):
     keyboard = Keyboard(one_time=False)
@@ -77,17 +68,13 @@ def get_main_menu_keyboard(user_id: int = None):
     keyboard.add(Text("📋 Просмотр броней"), color=KeyboardButtonColor.SECONDARY)
     keyboard.row()
     keyboard.add(Text("📋 Мои бронирования"), color=KeyboardButtonColor.SECONDARY)
-    
-    # Добавляем админ-кнопку только для администраторов
     if user_id and is_admin(user_id):
         keyboard.row()
         keyboard.add(Text("👑 Админ-панель"), color=KeyboardButtonColor.NEGATIVE)
-    
     return keyboard
 
 
 def get_admin_menu_keyboard():
-    """Клавиатура админ-панели."""
     keyboard = Keyboard(one_time=False)
     keyboard.add(Text("📊 Статистика за сегодня"), color=KeyboardButtonColor.PRIMARY)
     keyboard.row()
@@ -100,7 +87,6 @@ def get_admin_menu_keyboard():
 
 
 def get_view_bookings_keyboard():
-    """Клавиатура выбора периода просмотра броней."""
     keyboard = Keyboard(one_time=False)
     keyboard.add(Text("📅 Брони на сегодня"), color=KeyboardButtonColor.PRIMARY)
     keyboard.row()
@@ -111,17 +97,14 @@ def get_view_bookings_keyboard():
 
 
 def get_view_date_keyboard():
-    """Клавиатура для выбора даты просмотра броней."""
     keyboard = Keyboard(one_time=False)
     today = datetime.now(TIMEZONE)
     for i in range(7):
         date_obj = today + timedelta(days=i)
         date_str = date_obj.strftime("%d.%m.%Y")
         day_name = date_obj.strftime("%A")
-        day_ru = {
-            "Monday": "Пн", "Tuesday": "Вт", "Wednesday": "Ср",
-            "Thursday": "Чт", "Friday": "Пт", "Saturday": "Сб", "Sunday": "Вс"
-        }.get(day_name, day_name)
+        day_ru = {"Monday": "Пн", "Tuesday": "Вт", "Wednesday": "Ср",
+                  "Thursday": "Чт", "Friday": "Пт", "Saturday": "Сб", "Sunday": "Вс"}.get(day_name, day_name)
         if i == 0:
             label = f"Сегодня ({date_str})"
         elif i == 1:
@@ -150,10 +133,8 @@ def get_date_keyboard():
         date_obj = today + timedelta(days=i)
         date_str = date_obj.strftime("%d.%m.%Y")
         day_name = date_obj.strftime("%A")
-        day_ru = {
-            "Monday": "Пн", "Tuesday": "Вт", "Wednesday": "Ср",
-            "Thursday": "Чт", "Friday": "Пт", "Saturday": "Сб", "Sunday": "Вс"
-        }.get(day_name, day_name)
+        day_ru = {"Monday": "Пн", "Tuesday": "Вт", "Wednesday": "Ср",
+                  "Thursday": "Чт", "Friday": "Пт", "Saturday": "Сб", "Sunday": "Вс"}.get(day_name, day_name)
         if i == 0:
             label = f"Сегодня ({date_str})"
         elif i == 1:
@@ -177,10 +158,8 @@ def get_time_keyboard(available_slots):
 
 def get_duration_keyboard():
     keyboard = Keyboard(one_time=False)
-    durations = [
-        ("30 минут", 30), ("1 час", 60), ("1.5 часа", 90),
-        ("2 часа", 120), ("2.5 часа", 150), ("3 часа", 180),
-    ]
+    durations = [("30 минут", 30), ("1 час", 60), ("1.5 часа", 90),
+                 ("2 часа", 120), ("2.5 часа", 150), ("3 часа", 180)]
     for label, minutes in durations:
         keyboard.add(Text(label), color=KeyboardButtonColor.PRIMARY)
         keyboard.row()
@@ -204,8 +183,6 @@ def get_cancel_booking_keyboard(booking_id):
     return keyboard
 
 
-# === ХРАНИЛИЩЕ ДАННЫХ ===
-
 def get_user_data(peer_id):
     data = storage.get(f"user_{peer_id}")
     return data or {}
@@ -221,10 +198,7 @@ def update_user_data(peer_id, **kwargs):
     set_user_data(peer_id, data)
 
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
-
 async def get_user_name(user_id):
-    """Получает имя пользователя через VK API."""
     try:
         user_info = await bot.api.users.get(user_ids=user_id)
         if user_info:
@@ -235,37 +209,20 @@ async def get_user_name(user_id):
 
 
 def format_bookings_list(bookings, date_str):
-    """Формирует красивый список бронирований."""
     if not bookings:
         return f"На {date_str} бронирований пока нет."
-
     text = f"📅 Бронирования на {date_str}:\n\n"
     for booking in bookings:
         room_name = ROOMS.get(booking.get("Переговорка"), {}).get("name", booking.get("Переговорка"))
         username = booking.get("Имя", "—")
-        
-        # Нормализуем время - гарантируем формат HH:MM
         start_time = str(booking.get("Время Начала", ""))
         end_time = str(booking.get("Время Конца", ""))
-        
-        # Если время без минут, добавляем :00
         if ":" not in start_time:
             start_time = f"{start_time}:00"
         if ":" not in end_time:
             end_time = f"{end_time}:00"
-        
-        text += (
-            f"• {start_time} — {end_time} | "
-            f"{room_name} ({username})\n"
-        )
+        text += f"• {start_time} — {end_time} | {room_name} ({username})\n"
     return text
 
 
-# === ОБРАБОТЧИКИ ===
-# Все хэндлеры перенесены в vk/handlers.py
-# Импортируем их в конце файла для регистрации в labeler
-
-# Импортируем хэндлеры ТОЛЬКО после создания объекта bot и labeler
 from vk import handlers
-
-

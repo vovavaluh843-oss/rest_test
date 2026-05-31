@@ -12,10 +12,8 @@ from datetime import datetime, timedelta
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 from vkbottle.bot import Message
 
+from vk.loader import labeler
 from vk.vk_bot import (
-    labeler,
-    storage,
-    BookingState,
     is_admin,
     check_rate_limit,
     get_main_menu_keyboard,
@@ -33,6 +31,7 @@ from vk.vk_bot import (
     update_user_data,
     get_user_name,
     format_bookings_list,
+    BookingState,
     ROOMS,
     TIMEZONE,
     logger,
