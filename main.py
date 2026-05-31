@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
 from vk.loader import bot as vk_bot
+import vk.vk_bot  # Явный импорт для регистрации хэндлеров
 from data.database import db
 from config import ROOMS, TIMEZONE
 
