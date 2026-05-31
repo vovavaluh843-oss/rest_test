@@ -36,6 +36,12 @@ from config import (
 USERS_AUTH_SHEET_NAME = "users_auth"
 AUTH_CODE_EXPIRY_MINUTES = 10  # Время жизни кода авторизации
 
+# Статусы бронирований (вместо магических строк)
+STATUS_ACTIVE = "Активно"
+STATUS_CANCELLED = "Отменено"
+NOTIFICATION_PENDING = "Нет"
+NOTIFICATION_SENT = "Отправлено"
+
 # Получаем абсолютный путь к папке data/, где лежит текущий database.py
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE_NAME = "service_account.json"
@@ -244,10 +250,10 @@ class GoogleSheetsDB:
             booking for booking in all_bookings
             if booking.get("Дата") == date_str
             and booking.get("Переговорка") == room_id
-            and booking.get("Статус", "Активно") == "Активно"
+            and booking.get("Статус", STATUS_ACTIVE) == STATUS_ACTIVE
         ]
         return filtered
-
+        
     async def get_bookings_by_date(self, date_str):
         """Получает активные бронирования на конкретную дату."""
         await self.connect()
@@ -255,7 +261,7 @@ class GoogleSheetsDB:
         filtered = [
             booking for booking in all_bookings
             if booking.get("Дата") == date_str
-            and booking.get("Статус", "Активно") == "Активно"
+            and booking.get("Статус", STATUS_ACTIVE) == STATUS_ACTIVE
         ]
         return filtered
         
@@ -271,7 +277,7 @@ class GoogleSheetsDB:
 
         for booking in await self.get_all_bookings():
             # Проверяем статус бронирования
-            if booking.get("Статус", "Активно") != "Активно":
+            if booking.get("Статус", STATUS_ACTIVE) != STATUS_ACTIVE:
                 continue
 
             # Проверяем, принадлежит ли бронь любому из связанных ID
@@ -493,7 +499,7 @@ class GoogleSheetsDB:
             # Запись в Google Sheets
             await self._append_booking_row(
                 booking_id, safe_name, safe_platform, safe_user_id, safe_room_id,
-                date_str, start_time_str, end_time_str, safe_purpose, "Активно", "Нет")
+                date_str, start_time_str, end_time_str, safe_purpose, STATUS_ACTIVE, NOTIFICATION_PENDING)
 
             logger.info(f"Создано бронирование #{booking_id}: {safe_room_id} "
                         f"на {date_str} {start_time_str}-{end_time_str}")
@@ -520,7 +526,7 @@ class GoogleSheetsDB:
         return max_id + 1
 
     async def _append_booking_row(self, booking_id, user_name, platform, user_id,
-                                  room_id, date_str, start_time_str, end_time_str, purpose, status="Активно", notification_sent="Нет"):
+                                  room_id, date_str, start_time_str, end_time_str, purpose, status=STATUS_ACTIVE, notification_sent=NOTIFICATION_PENDING):
         """Добавляет строку бронирования в таблицу."""
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
@@ -569,18 +575,18 @@ class GoogleSheetsDB:
             try:
                 row_id = int(row[0])
                 row_user_id = str(row[3])
-                row_status = row[9] if len(row) > 9 else "Активно"
+                row_status = row[9] if len(row) > 9 else STATUS_ACTIVE
                 
                 # Проверяем: ID брони совпадает И ID пользователя в allowed_ids
                 if row_id == booking_id and row_user_id in allowed_ids:
                     # Проверяем, не отменена ли уже
-                    if row_status == "Отменено":
+                    if row_status == STATUS_CANCELLED:
                         logger.info(f"Бронирование #{booking_id} уже было отменено ранее")
                         return False, True
                     
                     # Soft delete: обновляем статус вместо удаления
-                    self._bookings_sheet.update_cell(idx, 10, "Отменено")
-                    logger.info(f"Бронирование #{booking_id} отменено (soft delete), user_id в записи: {row_user_id}")
+                    self._bookings_sheet.update_cell(idx, 10, STATUS_CANCELLED)
+                    logger.info(f"Бронирование #{booking_id} отменено (soft delete), user_id: {row_user_id}")
                     return True, False
             except (ValueError, IndexError):
                 continue
@@ -642,9 +648,9 @@ class GoogleSheetsDB:
 
         for booking in await self.get_all_bookings():
             # Проверяем статус и уведомление
-            if booking.get("Статус", "Активно") != "Активно":
+            if booking.get("Статус", STATUS_ACTIVE) != STATUS_ACTIVE:
                 continue
-            if booking.get("Уведомление", "Нет") == "Отправлено":
+            if booking.get("Уведомление", NOTIFICATION_PENDING) == NOTIFICATION_SENT:
                 continue
             
             # Проверяем дату (только сегодня)
@@ -687,7 +693,7 @@ class GoogleSheetsDB:
                 row_id = int(row[0])
                 if row_id == booking_id:
                     # Обновляем колонку K (11-я колонка, индекс 10)
-                    self._bookings_sheet.update_cell(idx, 11, "Отправлено")
+                    self._bookings_sheet.update_cell(idx, 11, NOTIFICATION_SENT)
                     logger.info(f"Уведомление для брони #{booking_id} помечено как отправленное")
                     return True
             except (ValueError, IndexError):
@@ -718,7 +724,7 @@ class GoogleSheetsDB:
         ]
         
         total = len(today_bookings)
-        active = sum(1 for b in today_bookings if b.get("Статус", "Активно") == "Активно")
+        active = sum(1 for b in today_bookings if b.get("Статус", STATUS_ACTIVE) == STATUS_ACTIVE)
         cancelled = total - active
         
         # Топ комнат
@@ -789,15 +795,15 @@ class GoogleSheetsDB:
                 continue
             try:
                 row_id = int(row[0])
-                row_status = row[9] if len(row) > 9 else "Активно"
+                row_status = row[9] if len(row) > 9 else STATUS_ACTIVE
                 
                 if row_id == booking_id:
-                    if row_status == "Отменено":
+                    if row_status == STATUS_CANCELLED:
                         logger.info(f"Админ: бронь #{booking_id} уже была отменена")
                         return False
                     
-                    self._bookings_sheet.update_cell(idx, 10, "Отменено")
-                    logger.info(f"Админ принудительно отменил бронь #{booking_id}")
+                    self._bookings_sheet.update_cell(idx, 10, STATUS_CANCELLED)
+                    logger.info(f"Admin force-cancelled booking #{booking_id}")
                     return True
             except (ValueError, IndexError):
                 continue

@@ -16,7 +16,6 @@ from config import VK_BOT_TOKEN, ROOMS, TIMEZONE, VK_ADMIN_IDS
 from data.database import db, BookingConflictError, ValidationError
 
 logger = logging.getLogger(__name__)
-logger.info("🔄 ЗАГРУЗКА vk/vk_bot.py НАЧАЛАСЬ")
 
 # === RATE LIMITING ===
 THROTTLE_INTERVAL = 1.0
@@ -698,19 +697,18 @@ async def process_admin_broadcast(message: Message):
 # === CATCH-ALL DEBUG ХЭНДЛЕР ===
 @bot.on.message()
 async def catch_all_messages(message: Message):
-    """Перехватывает все сообщения для отладки."""
-    logger.info(f"🔴 VK CATCH_ALL: text='{message.text}', from_id={message.from_id}, peer_id={message.peer_id}")
-    # Если сообщение не обработано другими хэндлерами, отвечаем
+    """Перехватывает нераспознанные текстовые сообщения."""
+    if not message.text:
+        return
+    logger.info(f"Unrecognized VK message: '{message.text}' from {message.from_id}")
     await message.answer(
         "Я не понял команду.\n\n"
-        "Напишите 'Начать' или нажмите кнопку 'Начать' для возврата в меню.",
+        "Напишите «Начать» для возврата в меню.",
         keyboard=get_main_menu_keyboard(message.from_id)
     )
 
 
-logger.info("✅ ЗАГРУЗКА vk/vk_bot.py ЗАВЕРШЕНА — все хэндлеры зарегистрированы")
-
-
 if __name__ == "__main__":
-    logger.info("🚀 Запуск VK бота напрямую...")
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Starting VK bot directly...")
     bot.run_forever()

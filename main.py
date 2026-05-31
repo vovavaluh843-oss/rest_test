@@ -73,15 +73,14 @@ async def send_reminder(booking, tg_bot, vk_bot):
             except Exception as e:
                 logger.error(f"Ошибка отправки напоминания в TG: {e}")
         
-        # Для VK используем API напрямую через requests (т.к. VK бот в отдельном процессе)
-        # Или импортируем vk_bot только для API calls
+        # Для VK отправляем через API (бот работает в отдельном процессе)
         try:
             from vk.vk_bot import bot as vk_bot_instance
             await vk_bot_instance.api.messages.send(user_id=int(user_id), message=message, random_id=0)
             sent_vk = True
-            logger.info(f"Напоминание отправлено в VK для брони #{booking_id}")
+            logger.info(f"Reminder sent via VK for booking #{booking_id}")
         except Exception as e:
-            logger.error(f"Ошибка отправки напоминания в VK: {e}")
+            logger.error(f"Failed to send VK reminder: {e}")
         
         if not sent_tg and not sent_vk:
             if platform == "TG":
@@ -94,9 +93,9 @@ async def send_reminder(booking, tg_bot, vk_bot):
                 try:
                     from vk.vk_bot import bot as vk_bot_instance
                     await vk_bot_instance.api.messages.send(user_id=int(user_id), message=message, random_id=0)
-                    logger.info(f"Напоминание отправлено в VK (без связки) для брони #{booking_id}")
+                    logger.info(f"Reminder sent via VK (no link) for booking #{booking_id}")
                 except Exception as e:
-                    logger.error(f"Ошибка отправки в VK: {e}")
+                    logger.error(f"Failed to send VK reminder (no link): {e}")
         
         await db.mark_reminder_sent(booking_id)
     except Exception as e:
