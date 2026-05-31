@@ -6,7 +6,7 @@ import signal
 import sys
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
-from vk.vk_bot import bot as vk_bot
+from vk import vk_bot
 from data.database import db
 from config import ROOMS, TIMEZONE
 
