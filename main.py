@@ -154,37 +154,6 @@ def signal_handler(sig, frame):
     shutdown_event.set()
 
 
-async def start_telegram():
-    """Запускает Telegram-бота через aiogram polling."""
-    try:
-        logger.info("Инициализация Telegram-бота...")
-        await tg_bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Telegram-бот успешно запущен в режиме Polling!")
-        await dp.start_polling(tg_bot)
-    except asyncio.CancelledError:
-        logger.info("Telegram-бот получил сигнал остановки.")
-        raise
-    except Exception as e:
-        logger.error(f"Критическая ошибка в работе Telegram-бота: {e}", exc_info=True)
-
-
-async def start_vk():
-    """Запускает VK-бота вручную через polling.listen() + process_event()."""
-    try:
-        logger.info("Инициализация VK-бота...")
-        logger.info("VK-бот успешно запущен в режиме LongPoll!")
-        # polling.listen() получает события из VK LongPoll, process_event() обрабатывает их через диспетчер
-        async for event in vk_bot.polling.listen():
-            if shutdown_event.is_set():
-                break
-            await vk_bot.process_event(event)
-    except asyncio.CancelledError:
-        logger.info("VK-бот получил сигнал остановки.")
-        raise
-    except Exception as e:
-        logger.error(f"Критическая ошибка в работе VK-бота: {e}", exc_info=True)
-
-
 async def main():
     logger.info("============================================================")
     logger.info("ЗАПУСК КРОССПЛАТФОРМЕННОЙ СИСТЕМЫ БРОНИРОВАНИЯ")
@@ -197,13 +166,17 @@ async def main():
     # Запускаем reminder scheduler как отдельный таск
     reminder_task = asyncio.create_task(reminder_scheduler())
 
+    # Подготовка ботов
+    logger.info("Инициализация Telegram-бота...")
+    await tg_bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Инициализация VK-бота...")
+
     # Запускаем ботов через gather
     logger.info("Запуск polling для Telegram и VK...")
     try:
         await asyncio.gather(
             dp.start_polling(tg_bot),
-            start_vk(),
-            shutdown_event.wait()
+            vk_bot.run_polling()
         )
     except Exception as e:
         logger.error(f"Критическая ошибка при поллинге: {e}", exc_info=True)
