@@ -988,3 +988,13 @@ async def process_admin_broadcast(message: Message):
         )
     
     await bot.state_dispenser.delete(message.peer_id)
+
+
+# === CATCH-ALL DEBUG ХЭНДЛЕР ===
+# Должен быть В САМОМ КОНЦЕ файла, чтобы не перекрывать другие команды
+
+@bot.on.message()
+async def catch_all_messages(message: Message):
+    """Перехватывает все сообщения для отладки."""
+    logger.info(f"VK BOT ПОЛУЧИЛ СООБЩЕНИЕ! Текст: '{message.text}', от ID: {message.from_id}, peer_id: {message.peer_id}")
+    # Не отвечаем ничего, чтобы не мешать другим хэндлерам

@@ -37,6 +37,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Включаем DEBUG для vkbottle
+from vkbottle import logger as vk_logger
+vk_logger.setLevel(logging.DEBUG)
+
 # Глобальный флаг для graceful shutdown
 shutdown_event = asyncio.Event()
 
