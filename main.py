@@ -6,8 +6,7 @@ import signal
 import sys
 from datetime import datetime, timedelta
 from tg.tg_bot import dp, bot as tg_bot
-from vk.loader import bot as vk_bot
-import vk.vk_bot  # Явный импорт для регистрации хэндлеров
+from vk.vk_bot import bot as vk_bot
 from data.database import db
 from config import ROOMS, TIMEZONE
 
@@ -57,11 +56,9 @@ async def send_reminder(booking, tg_bot, vk_bot):
         booking_id = booking.get("ID брони")
         
         room_name = ROOMS.get(room_id, {}).get("name", room_id)
-        
         message = f"⏰ Напоминание: У вас забронирована переговорка '{room_name}' на сегодня с {start_time} до {end_time}. Ждем вас!"
         
         linked_ids = await db.get_linked_user_ids(user_id, platform)
-        
         sent_tg = False
         sent_vk = False
         
@@ -98,7 +95,6 @@ async def send_reminder(booking, tg_bot, vk_bot):
                     logger.error(f"Ошибка отправки в VK: {e}")
         
         await db.mark_reminder_sent(booking_id)
-        
     except Exception as e:
         logger.error(f"Ошибка при отправке напоминания: {e}")
 
