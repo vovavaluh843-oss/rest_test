@@ -171,19 +171,27 @@ async def main():
     await tg_bot.delete_webhook(drop_pending_updates=True)
     logger.info("Инициализация VK-бота...")
 
-    # Запускаем ботов через gather
     logger.info("Запуск polling для Telegram и VK...")
+    # Создаем отдельные задачи для ботов
+    tg_task = asyncio.create_task(dp.start_polling(tg_bot))
+    vk_task = asyncio.create_task(vk_bot.run_polling())
     try:
-        await asyncio.gather(
-            dp.start_polling(tg_bot),
-            vk_bot.run_polling()
-        )
-    except Exception as e:
-        logger.error(f"Критическая ошибка при поллинге: {e}", exc_info=True)
+        # Держим приложение активным, пока не поступит сигнал остановки
+        await shutdown_event.wait()
+    except asyncio.CancelledError:
+        logger.info("Получен сигнал отмены.")
     finally:
-        # Graceful shutdown
-        logger.info("Остановка polling...")
-        # Закрываем сессии
+        logger.info("Начало graceful shutdown...")
+        # Мягко отменяем все фоновые задачи
+        tg_task.cancel()
+        vk_task.cancel()
+        if 'reminder_task' in locals():
+            reminder_task.cancel()
+        # Дожидаемся их корректного завершения, игнорируя ошибки отмены
+        await asyncio.gather(tg_task, vk_task, return_exceptions=True)
+        if 'reminder_task' in locals():
+            await asyncio.gather(reminder_task, return_exceptions=True)
+        # Закрываем HTTP-сессии
         try:
             await tg_bot.session.close()
             logger.info("Telegram HTTP-сессия закрыта.")
@@ -195,12 +203,6 @@ async def main():
                 logger.info("VK HTTP-сессия закрыта.")
         except Exception as e:
             logger.error(f"Ошибка закрытия VK сессии: {e}")
-        # Отменяем reminder scheduler
-        reminder_task.cancel()
-        try:
-            await reminder_task
-        except asyncio.CancelledError:
-            pass
 
     logger.info("============================================================")
     logger.info("Система бронирования остановлена.")
