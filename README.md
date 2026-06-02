@@ -180,8 +180,8 @@ TIMEZONE=Europe/Moscow
 В `config.py` укажите свои ID:
 
 ```python
-TG_ADMIN_IDS = [123456789]   # Ваш Telegram ID (узнать у @userinfobot)
-VK_ADMIN_IDS = [987654321]   # Ваш VK ID
+TG_ADMIN_IDS = [--------]   # Ваш Telegram ID (узнать у @userinfobot)
+VK_ADMIN_IDS = [--------]   # Ваш VK ID
 ```
 
 ### Добавление фотографий комнат
